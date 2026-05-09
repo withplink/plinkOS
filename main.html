@@ -846,7 +846,7 @@
               <Sheet pal={pal} title="Goodnight, pilnk?" subtitle="Power" onClose={()=>setSheet(null)} zIndex={40}>
                 <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                   {[
-                    { id:'reboot',   icon:'rotate', title:'Restart',   sub:'Quick reboot · ~12 seconds', tone:'soft' },
+                    { id:'reboot',   icon:'rotate', title:'Restart',   sub:'Quick reboot', tone:'soft' },
                     { id:'shutdown', icon:'power',  title:'Power off', sub:'Shutdown the Pi safely',       tone:'danger' },
                   ].map(opt=>(
                     <button key={opt.id} onClick={()=>{ haptic(opt.tone==='danger' ? [10,50,10] : 10); doAction(opt.id); }} style={{
