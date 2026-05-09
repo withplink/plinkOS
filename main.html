@@ -678,15 +678,16 @@
         useEffect(() => { refreshAll(); }, []);
 
         const doUpload = async (fd) => {
-          setLoading(true); setLoadMsg('Sending to display…'); setLoadSub('E-ink refresh · ~30 s');
+          const showNow = fd.get('show_now') === '1';
+          setLoading(true);
+          setLoadMsg(showNow ? 'Sending to display…' : 'Adding to queue…');
+          setLoadSub(showNow ? 'E-ink refresh · ~30 s' : '');
           try {
             const r = await fetch('/api/queue/add', { method:'POST', body:fd });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
-              // Only update the preview image if this was the first item (it just appeared on e-ink)
-              const wasFirst = d.queue.items.length === 1;
-              if (wasFirst && d.image_url) {
+              if (showNow && d.image_url) {
                 setState(s => ({ ...s, image: d.image_url + '?t=' + Date.now() }));
               }
             } else { alert('Upload failed: ' + (d.error || 'unknown')); }
@@ -714,13 +715,14 @@
           if (!isReboot && !isShutdown) setLoading(false);
         };
 
-        const handlePickFile = (file) => {
+        const handlePickFile = (file, showNow = true) => {
           const reader = new FileReader();
-          reader.onload = e => { setCropData({ file, dataUrl: e.target.result }); setSheet(null); setScreen('crop'); };
+          reader.onload = e => { setCropData({ file, dataUrl: e.target.result, showNow }); setSheet(null); setScreen('crop'); };
           reader.readAsDataURL(file);
         };
 
         const handleCropConfirm = async (result) => {
+          const showNow = cropData?.showNow !== false;
           setScreen('home'); setCropData(null);
           const fd = new FormData();
           const origName = cropData?.file?.name || 'photo.jpg';
@@ -732,6 +734,7 @@
             fd.append('file', result.file);
             fd.append('label', baseName);
           }
+          if (showNow) fd.append('show_now', '1');
           await doUpload(fd);
         };
 
@@ -835,9 +838,10 @@
                 onConfirm={handleCropConfirm}/>
             )}
 
-            {sheet === 'upload'   && <UploadSheet pal={pal} onClose={()=>setSheet(null)} onPickFile={handlePickFile}/>}
+            {sheet === 'upload'     && <UploadSheet pal={pal} onClose={()=>setSheet(null)} onPickFile={handlePickFile}/>}
+            {sheet === 'queue-add'  && <UploadSheet pal={pal} onClose={()=>setSheet(null)} onPickFile={f=>handlePickFile(f, false)}/>}
             {sheet === 'settings' && <SettingsSheet pal={pal} state={state} setState={setStateAndSave} onClose={()=>setSheet(null)} onRotate={handleRotate} onClearGhost={handleClearGhost} palette={palette} setPalette={setPalette} onPower={()=>setSheet('power')}/>}
-            {sheet === 'queue'    && <QueueSheet pal={pal} queue={queue} onClose={()=>setSheet(null)} onRemove={handleQueueRemove} onNext={handleQueueNext} onShow={handleQueueShow} onSetInterval={handleQueueInterval} onAddPhoto={()=>setSheet('upload')}/>}
+            {sheet === 'queue'    && <QueueSheet pal={pal} queue={queue} onClose={()=>setSheet(null)} onRemove={handleQueueRemove} onNext={handleQueueNext} onShow={handleQueueShow} onSetInterval={handleQueueInterval} onAddPhoto={()=>setSheet('queue-add')}/>}
             {sheet === 'power'    && (
               <Sheet pal={pal} title="Goodnight, pilnk?" subtitle="Power" onClose={()=>setSheet(null)} zIndex={40}>
                 <div style={{ display:'flex', flexDirection:'column', gap:10 }}>

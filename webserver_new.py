@@ -306,15 +306,18 @@ def api_queue_add():
         else:
             return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
 
+        show_now = request.form.get('show_now') == '1'
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
         q["items"].append(item)
-        was_empty = len(q["items"]) == 1
-        if was_empty:
-            q["current"] = 0
+        new_idx = len(q["items"]) - 1
+        was_empty = new_idx == 0
+
+        if was_empty or show_now:
+            q["current"] = new_idx
         save_queue(q)
 
-        if was_empty:
-            _show_queue_item(q, 0)
+        if was_empty or show_now:
+            _show_queue_item(q, new_idx)
 
         _schedule_rotate()
         return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename, 'queue': q}), mimetype='application/json')
