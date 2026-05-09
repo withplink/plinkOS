@@ -12,13 +12,15 @@ Send photos to your e-ink frame from your phone.
 
 ## Features
 
-- Upload photos from your phone (file picker or URL)
+- Upload photos from your phone
 - Crop to the display's aspect ratio before sending
-- Photo queue with auto-rotate interval
-- Palette themes: rose / ash / sun / ink
+- Photo queue with configurable auto-rotate interval
+- Palette themes: rose / ash / sun / ink (dark)
 - Portrait & landscape orientation support
 - PWA — add to home screen on iOS/Android
-- Device controls: rotate, clear ghosting, reboot, shutdown
+- Haptic feedback on iOS 18+ and Android
+- Swipe-to-dismiss sheets with spring animations
+- Device controls: rotate display, clear ghosting, reboot, shutdown
 
 ## Hardware
 

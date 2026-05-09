@@ -1,4 +1,3 @@
-import urllib.request
 import os,random,time,signal,subprocess,threading
 from flask import Flask, flash, request, redirect, url_for,render_template
 from werkzeug.utils import secure_filename
@@ -178,17 +177,8 @@ def api_upload():
             file.save(filepath)
             updateEink(filename, orientation, True)
             return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename}), mimetype='application/json')
-        elif request.form.get('url'):
-            url = request.form.get('url')
-            deleteImage()
-            filename = url.replace(':','').replace('/','').split('?')[0][-64:] or 'image.jpg'
-            if not any(filename.lower().endswith(e) for e in ['.jpg','.jpeg','.png','.webp']):
-                filename += '.jpg'
-            urllib.request.urlretrieve(url, os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            updateEink(filename, orientation, True)
-            return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename}), mimetype='application/json')
         else:
-            return app.response_class(json.dumps({'error': 'No file or URL provided'}), status=400, mimetype='application/json')
+            return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
@@ -313,16 +303,8 @@ def api_queue_add():
             ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
             filename = ts + secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        elif request.form.get('url'):
-            url = request.form.get('url')
-            raw = url.replace(':','').replace('/','').split('?')[0][-64:] or 'image.jpg'
-            if not any(raw.lower().endswith(e) for e in ['.jpg','.jpeg','.png','.webp']):
-                raw += '.jpg'
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
-            filename = ts + raw
-            urllib.request.urlretrieve(url, os.path.join(app.config['UPLOAD_FOLDER'], filename))
         else:
-            return app.response_class(json.dumps({'error': 'No file or URL provided'}), status=400, mimetype='application/json')
+            return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
 
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
         q["items"].append(item)
