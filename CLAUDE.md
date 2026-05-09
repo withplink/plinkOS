@@ -39,7 +39,8 @@ sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink
 ## UI Patterns
 
 - **Mobile-first:** touch targets, no hover states
-- **Sheet/modal pattern:** overlay is `position:'absolute', inset:0` (covers full screen including behind rounded corners); sheet div is `position:'relative'` with `borderRadius + overflow:'hidden'` outer div and `overflowY:'auto'` inner div
+- **Sheet/modal pattern:** Single `Sheet` component used everywhere. Overlay is `position:'absolute', inset:0` with `onPointerDown={onClose}` (works for mouse + touch, no synthetic-click issues); sheet div blocks it with `onPointerDown={e=>e.stopPropagation()}`. Sheet div uses `padding:'14px 22px 144px', marginBottom:'-100px'` — NO `overflow:'hidden'` — so the extra 100px extends below the viewport and absorbs spring-back overshoot. Inner scroll area uses `data-scroll` attribute so swipe-to-dismiss pauses when content is scrolled.
+- **Swipe-to-dismiss:** `useSwipeToDismiss` hook — direct ref style mutation (no state = 60fps). Dismiss if `delta > 120` or `(delta > 80 && velocity > 0.8)`. Spring-back uses `cubic-bezier(0.34,1.56,0.64,1)`. Entrance animation: `translateY(32px)→0` with same spring curve at `0.3s`.
 - **e-ink refresh (~30s):** always run in a background `threading.Thread(daemon=True)` so HTTP returns immediately; show a loading overlay in the frontend
 
 ## Queue System

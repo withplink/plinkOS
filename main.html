@@ -63,7 +63,7 @@ const useSwipeToDismiss = (onClose) => {
     drag.current.active = false;
     const { delta, startTime } = drag.current;
     const velocity = delta / (Date.now() - startTime);
-    const shouldDismiss = delta > 120 || (delta > 20 && velocity > 0.5);
+    const shouldDismiss = delta > 120 || (delta > 80 && velocity > 0.8);
     if (shouldDismiss) {
       haptic([10, 50, 10]);
       if (sheetRef.current) {
@@ -280,27 +280,25 @@ const Home = ({ pal, onOpen, onPower, state, queueCount }) => {
 };
 
 // ── Sheet shell ───────────────────────────────────────────────────────────────
-const Sheet = ({ pal, title, subtitle, onClose, children }) => {
+const Sheet = ({ pal, title, subtitle, onClose, zIndex=35, children }) => {
   const [open, setOpen] = useState(false);
   const { sheetRef, handlers } = useSwipeToDismiss(onClose);
   useEffect(() => { haptic(15); requestAnimationFrame(() => setOpen(true)); }, []);
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:35, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-      <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.35)', backdropFilter:'blur(2px)' }}/>
-      <div ref={sheetRef} {...handlers} style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'90%', overflow:'hidden', boxShadow:'0 -8px 24px -8px rgba(0,0,0,0.2)', transform: open ? 'translateY(0)' : 'translateY(32px)', transition:'transform 0.28s cubic-bezier(0.22,1,0.36,1)' }}>
-        <div data-scroll="" style={{ padding:'14px 22px 36px', overflowY:'auto', maxHeight:'90vh' }}>
-          <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 16px' }}/>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:18, gap:12 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>{subtitle}</div>
-              <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>{title}</h2>
-            </div>
-            <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
-              <Icon name="x" size={14}/>
-            </button>
+    <div style={{ position:'fixed', inset:0, zIndex, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
+      <div onPointerDown={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', backdropFilter:'blur(2px)' }}/>
+      <div ref={sheetRef} {...handlers} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, padding:'14px 22px 144px', marginBottom:'-100px', boxShadow:`0 -1px 0 ${pal.line}`, transform: open ? 'translateY(0)' : 'translateY(32px)', transition:'transform 0.3s cubic-bezier(0.34,1.56,0.64,1)' }}>
+        <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 18px' }}/>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:18, gap:12 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>{subtitle}</div>
+            <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>{title}</h2>
           </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:18 }}>{children}</div>
+          <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
+            <Icon name="x" size={14}/>
+          </button>
         </div>
+        <div data-scroll="" style={{ overflowY:'auto', maxHeight:'70vh', display:'flex', flexDirection:'column', gap:18 }}>{children}</div>
       </div>
     </div>
   );
@@ -625,51 +623,6 @@ const QueueSheet = ({ pal, queue, onClose, onRemove, onNext, onShow, onSetInterv
 };
 
 
-// ── POWER modal ───────────────────────────────────────────────────────────────
-const PowerModal = ({ pal, onClose, onAction }) => {
-  const [open, setOpen] = useState(false);
-  const { sheetRef, handlers } = useSwipeToDismiss(onClose);
-  useEffect(() => { haptic(15); requestAnimationFrame(() => setOpen(true)); }, []);
-  return (
-    <div style={{ position:'fixed', inset:0, zIndex:40, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-      <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', backdropFilter:'blur(2px)' }}/>
-      <div ref={sheetRef} {...handlers} style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, padding:'14px 22px 144px', marginBottom:'-100px', boxShadow:`0 -1px 0 ${pal.line}`, transform: open ? 'translateY(0)' : 'translateY(32px)', transition:'transform 0.28s cubic-bezier(0.22,1,0.36,1)' }}>
-        <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 18px' }}/>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:20, gap:12 }}>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>Power</div>
-            <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>Goodnight, pilnk?</h2>
-          </div>
-          <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
-            <Icon name="x" size={14}/>
-          </button>
-        </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {[
-            { id:'reboot',   icon:'rotate',   title:'Restart',   sub:'Quick reboot · ~12 seconds',  tone:'soft' },
-            { id:'shutdown', icon:'power',    title:'Power off', sub:'Shutdown the Pi safely',        tone:'danger' },
-          ].map(opt=>(
-            <button key={opt.id} onClick={()=>{ haptic(opt.tone==='danger' ? [10,50,10] : 10); onAction(opt.id); }} style={{
-              appearance:'none', cursor:'pointer', textAlign:'left',
-              background:opt.tone==='danger' ? 'rgba(220,50,50,0.06)' : pal.surf,
-              border:`1px solid ${opt.tone==='danger' ? pal.accent : pal.line}`,
-              borderRadius:16, padding:'14px 16px', display:'flex', alignItems:'center', gap:14,
-            }}>
-              <div style={{ width:40, height:40, borderRadius:10, background:opt.tone==='danger'?pal.accent:pal.chip, color:opt.tone==='danger'?pal.accentInk:pal.ink, display:'grid', placeItems:'center', flexShrink:0 }}>
-                <Icon name={opt.icon} size={18}/>
-              </div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:'Instrument Serif,serif', fontSize:20, color:opt.tone==='danger'?pal.accent:pal.ink, lineHeight:1.1 }}>{opt.title}</div>
-                <div style={{ fontSize:12, color:pal.sub, marginTop:2 }}>{opt.sub}</div>
-              </div>
-              <Icon name="arrow" size={16} color={pal.sub}/>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // ── Loading overlay ───────────────────────────────────────────────────────────
 const Loading = ({ pal, message, sub }) => (
@@ -881,7 +834,32 @@ function PilnkApp() {
       {sheet === 'upload'   && <UploadSheet pal={pal} onClose={()=>setSheet(null)} onPickFile={handlePickFile} onSubmitUrl={handleSubmitUrl}/>}
       {sheet === 'settings' && <SettingsSheet pal={pal} state={state} setState={setStateAndSave} onClose={()=>setSheet(null)} onRotate={handleRotate} onClearGhost={handleClearGhost} palette={palette} setPalette={setPalette} onPower={()=>setSheet('power')}/>}
       {sheet === 'queue'    && <QueueSheet pal={pal} queue={queue} onClose={()=>setSheet(null)} onRemove={handleQueueRemove} onNext={handleQueueNext} onShow={handleQueueShow} onSetInterval={handleQueueInterval} onAddPhoto={()=>setSheet('upload')}/>}
-      {sheet === 'power'    && <PowerModal pal={pal} onClose={()=>setSheet(null)} onAction={doAction}/>}
+      {sheet === 'power'    && (
+        <Sheet pal={pal} title="Goodnight, pilnk?" subtitle="Power" onClose={()=>setSheet(null)} zIndex={40}>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[
+              { id:'reboot',   icon:'rotate', title:'Restart',   sub:'Quick reboot · ~12 seconds', tone:'soft' },
+              { id:'shutdown', icon:'power',  title:'Power off', sub:'Shutdown the Pi safely',       tone:'danger' },
+            ].map(opt=>(
+              <button key={opt.id} onClick={()=>{ haptic(opt.tone==='danger' ? [10,50,10] : 10); doAction(opt.id); }} style={{
+                appearance:'none', cursor:'pointer', textAlign:'left',
+                background:opt.tone==='danger' ? 'rgba(220,50,50,0.06)' : pal.surf,
+                border:`1px solid ${opt.tone==='danger' ? pal.accent : pal.line}`,
+                borderRadius:16, padding:'14px 16px', display:'flex', alignItems:'center', gap:14,
+              }}>
+                <div style={{ width:40, height:40, borderRadius:10, background:opt.tone==='danger'?pal.accent:pal.chip, color:opt.tone==='danger'?pal.accentInk:pal.ink, display:'grid', placeItems:'center', flexShrink:0 }}>
+                  <Icon name={opt.icon} size={18}/>
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontFamily:'Instrument Serif,serif', fontSize:20, color:opt.tone==='danger'?pal.accent:pal.ink, lineHeight:1.1 }}>{opt.title}</div>
+                  <div style={{ fontSize:12, color:pal.sub, marginTop:2 }}>{opt.sub}</div>
+                </div>
+                <Icon name="arrow" size={16} color={pal.sub}/>
+              </button>
+            ))}
+          </div>
+        </Sheet>
+      )}
 
       {loading && <Loading pal={pal} message={loadMsg} sub={loadSub}/>}
     </div>
