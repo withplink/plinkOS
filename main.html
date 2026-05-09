@@ -36,6 +36,52 @@
 {% raw %}
 const { useState, useRef, useEffect } = React;
 
+const haptic = (p) => navigator.vibrate?.(p);
+
+const useSwipeToDismiss = (onClose) => {
+  const sheetRef = useRef(null);
+  const drag = useRef({ active:false, startY:0, startTime:0, delta:0 });
+
+  const onTouchStart = (e) => {
+    const inner = sheetRef.current?.querySelector('[data-scroll]');
+    if (inner && inner.scrollTop > 0) return;
+    drag.current = { active:true, startY:e.touches[0].clientY, startTime:Date.now(), delta:0 };
+    if (sheetRef.current) sheetRef.current.style.transition = 'none';
+  };
+
+  const onTouchMove = (e) => {
+    if (!drag.current.active) return;
+    const inner = sheetRef.current?.querySelector('[data-scroll]');
+    if (inner && inner.scrollTop > 0) { drag.current.active = false; return; }
+    const dy = Math.max(0, e.touches[0].clientY - drag.current.startY);
+    drag.current.delta = dy;
+    if (sheetRef.current) sheetRef.current.style.transform = `translateY(${dy}px)`;
+  };
+
+  const onTouchEnd = () => {
+    if (!drag.current.active) return;
+    drag.current.active = false;
+    const { delta, startTime } = drag.current;
+    const velocity = delta / (Date.now() - startTime);
+    const shouldDismiss = delta > 120 || (delta > 20 && velocity > 0.5);
+    if (shouldDismiss) {
+      haptic([10, 50, 10]);
+      if (sheetRef.current) {
+        sheetRef.current.style.transition = 'transform 0.25s ease';
+        sheetRef.current.style.transform = 'translateY(100%)';
+      }
+      setTimeout(onClose, 220);
+    } else {
+      if (sheetRef.current) {
+        sheetRef.current.style.transition = 'transform 0.35s cubic-bezier(0.34,1.56,0.64,1)';
+        sheetRef.current.style.transform = 'translateY(0)';
+      }
+    }
+  };
+
+  return { sheetRef, handlers: { onTouchStart, onTouchMove, onTouchEnd } };
+};
+
 const PALETTES = {
   rose: { bg:'oklch(0.97 0.012 60)',  surf:'#ffffff', ink:'oklch(0.18 0.012 50)', sub:'oklch(0.50 0.012 60)', line:'oklch(0.88 0.012 60)', accent:'oklch(0.66 0.13 18)',  accentInk:'#fff',     chip:'oklch(0.94 0.014 60)' },
   ash:  { bg:'oklch(0.97 0.006 250)', surf:'#ffffff', ink:'oklch(0.18 0.012 250)',sub:'oklch(0.48 0.012 250)',line:'oklch(0.88 0.008 250)',accent:'oklch(0.55 0.04 250)',  accentInk:'#fff',     chip:'oklch(0.94 0.008 250)' },
@@ -134,7 +180,10 @@ const Tile = ({ pal, children, onClick, style={}, accent=false }) => (
   }}
   onMouseDown={e=>e.currentTarget.style.transform='scale(0.985)'}
   onMouseUp={e=>e.currentTarget.style.transform=''}
-  onMouseLeave={e=>e.currentTarget.style.transform=''}>
+  onMouseLeave={e=>e.currentTarget.style.transform=''}
+  onTouchStart={e=>{haptic(10);e.currentTarget.style.transform='scale(0.985)';}}
+  onTouchEnd={e=>e.currentTarget.style.transform=''}
+  onTouchCancel={e=>e.currentTarget.style.transform=''}>
     {children}
   </button>
 );
@@ -231,26 +280,31 @@ const Home = ({ pal, onOpen, onPower, state, queueCount }) => {
 };
 
 // ── Sheet shell ───────────────────────────────────────────────────────────────
-const Sheet = ({ pal, title, subtitle, onClose, children }) => (
-  <div style={{ position:'fixed', inset:0, zIndex:35, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-    <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.35)', backdropFilter:'blur(2px)' }}/>
-    <div style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'90%', overflow:'hidden', boxShadow:'0 -8px 24px -8px rgba(0,0,0,0.2)' }}>
-    <div style={{ padding:'14px 22px 36px', overflowY:'auto', maxHeight:'90vh' }}>
-      <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 16px' }}/>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:18, gap:12 }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>{subtitle}</div>
-          <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>{title}</h2>
+const Sheet = ({ pal, title, subtitle, onClose, children }) => {
+  const [open, setOpen] = useState(false);
+  const { sheetRef, handlers } = useSwipeToDismiss(onClose);
+  useEffect(() => { haptic(15); requestAnimationFrame(() => setOpen(true)); }, []);
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:35, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
+      <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.35)', backdropFilter:'blur(2px)' }}/>
+      <div ref={sheetRef} {...handlers} style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, maxHeight:'90%', overflow:'hidden', boxShadow:'0 -8px 24px -8px rgba(0,0,0,0.2)', transform: open ? 'translateY(0)' : 'translateY(32px)', transition:'transform 0.28s cubic-bezier(0.22,1,0.36,1)' }}>
+        <div data-scroll="" style={{ padding:'14px 22px 36px', overflowY:'auto', maxHeight:'90vh' }}>
+          <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 16px' }}/>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:18, gap:12 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>{subtitle}</div>
+              <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>{title}</h2>
+            </div>
+            <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
+              <Icon name="x" size={14}/>
+            </button>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:18 }}>{children}</div>
         </div>
-        <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
-          <Icon name="x" size={14}/>
-        </button>
       </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:18 }}>{children}</div>
     </div>
-    </div>
-  </div>
-);
+  );
+};
 
 // ── UPLOAD sheet ──────────────────────────────────────────────────────────────
 const UploadSheet = ({ pal, onClose, onPickFile, onSubmitUrl }) => {
@@ -385,7 +439,7 @@ const CropScreen = ({ pal, imageFile, imageDataUrl, orientation, onCancel, onCon
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
 const Toggle = ({ pal, on, onChange }) => (
-  <button onClick={()=>onChange(!on)} style={{
+  <button onClick={()=>{haptic(10);onChange(!on);}} style={{
     appearance:'none', cursor:'pointer', border:`1px solid ${pal.line}`,
     width:44, height:26, borderRadius:99, padding:2,
     background:on ? pal.accent : pal.chip, transition:'background .18s',
@@ -518,7 +572,7 @@ const QueueSheet = ({ pal, queue, onClose, onRemove, onNext, onShow, onSetInterv
           {items.map((it, i) => {
             const isCur = i === cur;
             return (
-              <div key={it.added_at} onClick={() => !isCur && onShow(i)} style={{
+              <div key={it.added_at} onClick={() => { if (!isCur) { haptic(10); onShow(i); } }} style={{
                 display:'flex', alignItems:'center', gap:14, padding:'10px 12px',
                 background: isCur ? pal.surf : pal.chip,
                 border:`1px solid ${isCur ? pal.accent : pal.line}`, borderRadius:14,
@@ -570,46 +624,52 @@ const QueueSheet = ({ pal, queue, onClose, onRemove, onNext, onShow, onSetInterv
   );
 };
 
+
 // ── POWER modal ───────────────────────────────────────────────────────────────
-const PowerModal = ({ pal, onClose, onAction }) => (
-  <div style={{ position:'fixed', inset:0, zIndex:40, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-    <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', backdropFilter:'blur(2px)' }}/>
-    <div style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, padding:'14px 22px 44px', boxShadow:`0 -1px 0 ${pal.line}` }}>
-      <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 18px' }}/>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:20, gap:12 }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>Power</div>
-          <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>Goodnight, pilnk?</h2>
-        </div>
-        <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
-          <Icon name="x" size={14}/>
-        </button>
-      </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-        {[
-          { id:'reboot',   icon:'rotate',   title:'Restart',   sub:'Quick reboot · ~12 seconds',  tone:'soft' },
-          { id:'shutdown', icon:'power',    title:'Power off', sub:'Shutdown the Pi safely',        tone:'danger' },
-        ].map(opt=>(
-          <button key={opt.id} onClick={()=>onAction(opt.id)} style={{
-            appearance:'none', cursor:'pointer', textAlign:'left',
-            background:opt.tone==='danger' ? 'rgba(220,50,50,0.06)' : pal.surf,
-            border:`1px solid ${opt.tone==='danger' ? pal.accent : pal.line}`,
-            borderRadius:16, padding:'14px 16px', display:'flex', alignItems:'center', gap:14,
-          }}>
-            <div style={{ width:40, height:40, borderRadius:10, background:opt.tone==='danger'?pal.accent:pal.chip, color:opt.tone==='danger'?pal.accentInk:pal.ink, display:'grid', placeItems:'center', flexShrink:0 }}>
-              <Icon name={opt.icon} size={18}/>
-            </div>
-            <div style={{ flex:1 }}>
-              <div style={{ fontFamily:'Instrument Serif,serif', fontSize:20, color:opt.tone==='danger'?pal.accent:pal.ink, lineHeight:1.1 }}>{opt.title}</div>
-              <div style={{ fontSize:12, color:pal.sub, marginTop:2 }}>{opt.sub}</div>
-            </div>
-            <Icon name="arrow" size={16} color={pal.sub}/>
+const PowerModal = ({ pal, onClose, onAction }) => {
+  const [open, setOpen] = useState(false);
+  const { sheetRef, handlers } = useSwipeToDismiss(onClose);
+  useEffect(() => { haptic(15); requestAnimationFrame(() => setOpen(true)); }, []);
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:40, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
+      <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', backdropFilter:'blur(2px)' }}/>
+      <div ref={sheetRef} {...handlers} style={{ position:'relative', background:pal.bg, borderTopLeftRadius:28, borderTopRightRadius:28, padding:'14px 22px 144px', marginBottom:'-100px', boxShadow:`0 -1px 0 ${pal.line}`, transform: open ? 'translateY(0)' : 'translateY(32px)', transition:'transform 0.28s cubic-bezier(0.22,1,0.36,1)' }}>
+        <div style={{ width:36, height:4, background:pal.line, borderRadius:99, margin:'0 auto 18px' }}/>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:20, gap:12 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontFamily:'Geist Mono,monospace', fontSize:10, letterSpacing:1.5, color:pal.sub, textTransform:'uppercase' }}>Power</div>
+            <h2 style={{ fontFamily:'Instrument Serif,serif', fontWeight:400, fontSize:28, color:pal.ink, margin:'4px 0 0', letterSpacing:-0.4 }}>Goodnight, pilnk?</h2>
+          </div>
+          <button onClick={onClose} style={{ appearance:'none', background:pal.chip, border:`1px solid ${pal.line}`, borderRadius:99, width:32, height:32, display:'grid', placeItems:'center', cursor:'pointer', color:pal.ink, flexShrink:0 }}>
+            <Icon name="x" size={14}/>
           </button>
-        ))}
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {[
+            { id:'reboot',   icon:'rotate',   title:'Restart',   sub:'Quick reboot · ~12 seconds',  tone:'soft' },
+            { id:'shutdown', icon:'power',    title:'Power off', sub:'Shutdown the Pi safely',        tone:'danger' },
+          ].map(opt=>(
+            <button key={opt.id} onClick={()=>{ haptic(opt.tone==='danger' ? [10,50,10] : 10); onAction(opt.id); }} style={{
+              appearance:'none', cursor:'pointer', textAlign:'left',
+              background:opt.tone==='danger' ? 'rgba(220,50,50,0.06)' : pal.surf,
+              border:`1px solid ${opt.tone==='danger' ? pal.accent : pal.line}`,
+              borderRadius:16, padding:'14px 16px', display:'flex', alignItems:'center', gap:14,
+            }}>
+              <div style={{ width:40, height:40, borderRadius:10, background:opt.tone==='danger'?pal.accent:pal.chip, color:opt.tone==='danger'?pal.accentInk:pal.ink, display:'grid', placeItems:'center', flexShrink:0 }}>
+                <Icon name={opt.icon} size={18}/>
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontFamily:'Instrument Serif,serif', fontSize:20, color:opt.tone==='danger'?pal.accent:pal.ink, lineHeight:1.1 }}>{opt.title}</div>
+                <div style={{ fontSize:12, color:pal.sub, marginTop:2 }}>{opt.sub}</div>
+              </div>
+              <Icon name="arrow" size={16} color={pal.sub}/>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ── Loading overlay ───────────────────────────────────────────────────────────
 const Loading = ({ pal, message, sub }) => (
@@ -747,6 +807,7 @@ function PilnkApp() {
   };
 
   const handleQueueRemove = async (idx) => {
+    haptic([10, 50, 10]);
     const wasCurrentItem = idx === queue.current;
     const hadMoreItems = queue.items.length > 1;
     const showEinkLoader = wasCurrentItem && hadMoreItems;
