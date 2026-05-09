@@ -1,0 +1,12 @@
+{
+  "name": "Pilnk",
+  "short_name": "Pilnk",
+  "description": "e-ink photo frame companion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#d46b7a",
+  "theme_color": "#d46b7a",
+  "icons": [
+    { "src": "/static/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
