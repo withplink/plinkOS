@@ -51,3 +51,7 @@ Send photos to your e-ink frame from your phone.
 ## Design
 
 Cream paper background, muted rose accent, 1px hairlines, halftone dot textures, Instrument Serif + Geist typefaces.
+
+## Based on
+
+[PiInk](https://github.com/tlstommy/PiInk) by [@tlstommy](https://github.com/tlstommy)
