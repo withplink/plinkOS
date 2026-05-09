@@ -1,25 +1,53 @@
-# CODING AGENTS: READ THIS FIRST
+# pi-ink
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+A mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an [Inky Impression](https://shop.pimoroni.com/products/inky-impression-7-3) e-ink display.
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+Send photos to your e-ink frame from your phone.
 
-## What you should do — IMPORTANT
+## Stack
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `piink/chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+- **Backend** — Flask (Python), runs on the Pi at port 80
+- **Frontend** — React 18 + Babel standalone (no build step), single `main.html` Jinja2 template
+- **Display** — Inky Impression 7-colour e-ink, driven by Pimoroni's Python library
 
-**Read `piink/project/index.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+## Features
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+- Upload photos from your phone (file picker or URL)
+- Crop to the display's aspect ratio before sending
+- Photo queue with auto-rotate interval
+- Palette themes: rose / ash / sun / ink
+- Portrait & landscape orientation support
+- PWA — add to home screen on iOS/Android
+- Device controls: rotate, clear ghosting, reboot, shutdown
 
-## About the design files
+## Hardware
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+- Raspberry Pi Zero 2W
+- Inky Impression e-ink display (7.3")
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+## Setup
 
-## Bundle contents
+1. Clone onto the Pi:
+   ```bash
+   git clone https://github.com/PixeledCode/pi-ink /home/pi/PiInk
+   ```
 
-- `piink/README.md` — this file
-- `piink/chats/` — conversation transcripts (read these!)
-- `piink/project/` — the `Piink` project files (HTML prototypes, assets, components)
+2. Install dependencies:
+   ```bash
+   pip install flask pillow inky
+   ```
+
+3. Copy files to their expected paths:
+   - `webserver_new.py` → `/home/pi/PiInk/src/webserver.py`
+   - `main.html` → `/home/pi/PiInk/src/templates/main.html`
+
+4. Run:
+   ```bash
+   sudo python /home/pi/PiInk/src/webserver.py
+   ```
+
+   Or set up as a systemd service for auto-start on boot.
+
+## Design
+
+Cream paper background, muted rose accent, 1px hairlines, halftone dot textures, Instrument Serif + Geist typefaces.
