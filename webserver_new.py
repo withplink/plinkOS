@@ -522,19 +522,24 @@ def manifest():
 
 
 _SW = r"""
-const CACHE = 'piink-v3';
+const CACHE = 'piink-v4';
+const SHELL = ['/', '/manifest.json', '/sw.js', '/static/icon.png'];
 
 self.addEventListener('install', e => {
-  // Don't block install on a network fetch — Pi may be offline.
-  // The page will be cached on first successful navigation instead.
   self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
+  // After claiming clients, fetch and cache the app shell immediately.
+  // This fires on the same page load that registered the SW, so the Pi
+  // is reachable and the cache gets populated before the user ever goes offline.
   e.waitUntil(
     caches.keys()
       .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => clients.claim())
+      .then(() => caches.open(CACHE).then(c =>
+        Promise.all(SHELL.map(url => c.add(url).catch(() => {})))
+      ))
   );
 });
 
