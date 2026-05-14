@@ -522,10 +522,11 @@ def manifest():
 
 
 _SW = r"""
-const CACHE = 'piink-v2';
+const CACHE = 'piink-v3';
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.add('/')));
+  // Don't block install on a network fetch — Pi may be offline.
+  // The page will be cached on first successful navigation instead.
   self.skipWaiting();
 });
 
@@ -547,7 +548,11 @@ self.addEventListener('fetch', e => {
   if (request.mode === 'navigate') {
     e.respondWith(
       fetch(request)
-        .then(r => { caches.open(CACHE).then(c => c.put('/', r.clone())); return r; })
+        .then(r => {
+          // Cache the page every time it loads successfully
+          caches.open(CACHE).then(c => c.put('/', r.clone()));
+          return r;
+        })
         .catch(() => caches.match('/'))
     );
     return;
