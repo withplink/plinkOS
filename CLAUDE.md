@@ -12,7 +12,10 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 ## Deploy Commands
 
 ```bash
-# Deploy both files and restart
+# One-command deploy (use this)
+./deploy.sh
+
+# Manual equivalent
 sshpass -p '5409' scp webserver_new.py pi@pi.local:/home/pi/PiInk/src/webserver.py
 sshpass -p '5409' scp main.html pi@pi.local:/home/pi/PiInk/src/templates/main.html
 sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink && echo done"
@@ -44,6 +47,9 @@ sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink
 - **Haptics:** `haptic(ms)` calls `navigator.vibrate?.(ms)` (Android) with `?? _iosHapticLabel.click()` fallback for iOS 18+ (`<input type="checkbox" switch>` trick). Must be called from a user-gesture handler to trigger on iOS.
 - **e-ink refresh (~30s):** always run in a background `threading.Thread(daemon=True)` so HTTP returns immediately; show a loading overlay in the frontend
 - **Upload:** file picker only — URL upload removed
+- **Offline detection:** `refreshAll()` polls every 30s when online, 8s when offline. `fetch('/api/status')` has `AbortSignal.timeout(5000)` so mobile detects connectivity loss within ~5s.
+- **Service worker:** `plink-v1`, network-first for navigation (re-caches shell on every online load), bypasses `/api/*` entirely. Caches `'/'`, `/manifest.json`, `/static/icon.png` at install time.
+- **Contextual URL hints:** on HTTPS (Tailscale) + offline → shows `pi.local ↗`. On `pi.local` + Tailscale reachable → shows `switch to tailscale ↗`.
 
 ## Queue System
 

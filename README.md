@@ -1,8 +1,8 @@
-# pi-ink
+# Plink
 
 A mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an [Inky Impression](https://shop.pimoroni.com/products/inky-impression-7-3) e-ink display.
 
-Send photos to your e-ink frame from your phone.
+Send a moment to your plink.
 
 ## Stack
 
@@ -17,10 +17,11 @@ Send photos to your e-ink frame from your phone.
 - Photo queue with configurable auto-rotate interval
 - Palette themes: rose / ash / sun / ink (dark)
 - Portrait & landscape orientation support
-- PWA — add to home screen on iOS/Android
+- PWA — add to home screen on iOS/Android, loads offline (cached shell via service worker)
 - Haptic feedback on iOS 18+ and Android
 - Swipe-to-dismiss sheets with spring animations
 - Device controls: rotate display, clear ghosting, reboot, shutdown
+- Online/offline status dot — auto-detects connectivity, shows local URL hint when on Tailscale and Pi is unreachable
 
 ## Hardware
 
@@ -49,6 +50,16 @@ Send photos to your e-ink frame from your phone.
    ```
 
    Or set up as a systemd service for auto-start on boot.
+
+## Deploying changes
+
+From the repo root on your Mac:
+
+```bash
+./deploy.sh
+```
+
+Copies both files to the Pi and restarts the service.
 
 ## Design
 
