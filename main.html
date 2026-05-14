@@ -663,6 +663,10 @@
         const [online, setOnline] = useState(null); // null=unknown, true=connected, false=offline
         const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
+        const apiBase = useRef('');
+        const api = (path, opts) => fetch(apiBase.current + path, opts);
+        const imgSrc = (path) => path ? apiBase.current + path + '?t=' + Date.now() : null;
+
         // Lock body scroll when a sheet/modal is open
         useEffect(() => {
           document.body.style.overflow = sheet ? 'hidden' : '';
@@ -670,17 +674,27 @@
         }, [sheet]);
 
         const refreshAll = () => {
-          fetch('/api/status').then(r=>r.json()).then(d => {
-            setOnline(true);
-            setState(s => ({
-              ...s,
-              image: d.image_url ? d.image_url + '?t=' + Date.now() : s.image,
-              orientation: d.orientation || 'landscape',
-              wifi: d.wifi || '--',
-              uptime: d.uptime || '--',
-            }));
-          }).catch(() => setOnline(false));
-          fetch('/api/queue').then(r=>r.json()).then(setQueue).catch(()=>{});
+          const tryBase = (base) =>
+            fetch(base + '/api/status').then(r => { if (!r.ok) throw 0; return r.json(); });
+          const bases = window.location.hostname === 'pi.local' ? [''] : ['', 'http://pi.local'];
+          const attempt = (i) => {
+            if (i >= bases.length) { setOnline(false); return; }
+            tryBase(bases[i])
+              .then(d => {
+                apiBase.current = bases[i];
+                setOnline(true);
+                setState(s => ({
+                  ...s,
+                  image: imgSrc(d.image_url) || s.image,
+                  orientation: d.orientation || 'landscape',
+                  wifi: d.wifi || '--',
+                  uptime: d.uptime || '--',
+                }));
+                fetch(apiBase.current + '/api/queue').then(r=>r.json()).then(setQueue).catch(()=>{});
+              })
+              .catch(() => attempt(i + 1));
+          };
+          attempt(0);
         };
 
         // Retry every 8 seconds while offline
@@ -705,12 +719,12 @@
           setLoadMsg(showNow ? 'Sending to display…' : 'Adding to queue…');
           setLoadSub(showNow ? 'E-ink refresh · ~30 s' : '');
           try {
-            const r = await fetch('/api/queue/add', { method:'POST', body:fd });
+            const r = await api('/api/queue/add', { method:'POST', body:fd });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
               if (showNow && d.image_url) {
-                setState(s => ({ ...s, image: d.image_url + '?t=' + Date.now() }));
+                setState(s => ({ ...s, image: imgSrc(d.image_url) }));
               }
             } else { alert('Upload failed: ' + (d.error || 'unknown')); }
           } catch(e) { alert('Upload error: ' + e.message); }
@@ -724,11 +738,11 @@
           if (isReboot)   { setLoading(true); setLoadMsg('Restarting…');     setLoadSub('Reconnecting when Pi is back…'); }
           if (isShutdown) { setLoading(true); setLoadMsg('Shutting down…');  setLoadSub('Power off the Pi safely'); }
           const fd = new FormData(); fd.append('action', action);
-          try { await fetch('/api/action', { method:'POST', body:fd }); } catch(e) {}
+          try { await api('/api/action', { method:'POST', body:fd }); } catch(e) {}
           if (isReboot) {
             // Poll until the Pi responds, then reload
             const poll = () => {
-              fetch('/api/status', { signal: AbortSignal.timeout(3000) })
+              api('/api/status', { signal: AbortSignal.timeout(3000) })
                 .then(() => window.location.reload())
                 .catch(() => setTimeout(poll, 2000));
             };
@@ -764,7 +778,7 @@
           setState(prev => {
             const next = typeof updater === 'function' ? updater(prev) : updater;
             if (next.orientation !== prev.orientation) {
-              fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orientation: next.orientation }) }).catch(()=>{});
+              api('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orientation: next.orientation }) }).catch(()=>{});
             }
             return next;
           });
@@ -774,9 +788,9 @@
           setSheet(null); setLoading(true); setLoadMsg('Rotating…'); setLoadSub('E-ink refresh · ~30 s');
           const fd = new FormData(); fd.append('action','rotate');
           try {
-            const r = await fetch('/api/action', { method:'POST', body:fd });
+            const r = await api('/api/action', { method:'POST', body:fd });
             const d = await r.json();
-            if (d.ok && d.image_url) setState(s => ({ ...s, image: d.image_url + '?t=' + Date.now() }));
+            if (d.ok && d.image_url) setState(s => ({ ...s, image: imgSrc(d.image_url) }));
           } catch(e) {}
           setLoading(false);
         };
@@ -784,7 +798,7 @@
         const handleClearGhost = async () => {
           setSheet(null); setLoading(true); setLoadMsg('Clearing ghosting…'); setLoadSub('E-ink refresh · ~60 s');
           const fd = new FormData(); fd.append('action','clear_ghost');
-          try { await fetch('/api/action', { method:'POST', body:fd }); } catch(e) {}
+          try { await api('/api/action', { method:'POST', body:fd }); } catch(e) {}
           setLoading(false);
         };
 
@@ -801,13 +815,13 @@
           }
 
           try {
-            const r = await fetch('/api/queue/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
+            const r = await api('/api/queue/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
               if (showEinkLoader) {
                 const newItem = d.queue.items[d.queue.current];
-                if (newItem) setState(s => ({ ...s, image: '/uploads/' + newItem.filename + '?t=' + Date.now() }));
+                if (newItem) setState(s => ({ ...s, image: imgSrc('/uploads/' + newItem.filename) }));
               }
             }
           } catch(e) {}
@@ -817,7 +831,7 @@
           setSheet(null);
           setLoading(true); setLoadMsg('Next photo…'); setLoadSub('E-ink refresh · ~30 s');
           try {
-            const r = await fetch('/api/queue/next', { method:'POST' });
+            const r = await api('/api/queue/next', { method:'POST' });
             const d = await r.json();
             if (d.ok) { setQueue(d.queue); refreshAll(); }
           } catch(e) {}
@@ -828,12 +842,12 @@
           if (idx === queue.current) return;
           setLoading(true); setLoadMsg('Switching photo…'); setLoadSub('E-ink refresh · ~30 s');
           try {
-            const r = await fetch('/api/queue/show', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
+            const r = await api('/api/queue/show', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
               const item = d.queue.items[idx];
-              if (item) setState(s => ({ ...s, image: '/uploads/' + item.filename + '?t=' + Date.now() }));
+              if (item) setState(s => ({ ...s, image: imgSrc('/uploads/' + item.filename) }));
             }
           } catch(e) {}
           setLoading(false);
@@ -841,7 +855,7 @@
 
         const handleQueueInterval = async (minutes) => {
           try {
-            await fetch('/api/queue/interval', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ minutes }) });
+            await api('/api/queue/interval', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ minutes }) });
             setQueue(q => ({ ...q, interval: minutes }));
           } catch(e) {}
         };

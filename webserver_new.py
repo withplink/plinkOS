@@ -33,6 +33,22 @@ inky_display.set_border(inky_display.BLACK)
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+@app.before_request
+def handle_preflight():
+    if request.method == 'OPTIONS':
+        resp = app.response_class('', status=204)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return resp
+
+@app.after_request
+def add_cors(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
+
 def handleButton(pin):
     if(pin == 5):
         print("--A-- Pressed: Show PiInk info")
@@ -522,7 +538,7 @@ def manifest():
 
 
 _SW = r"""
-const CACHE = 'piink-v5';
+const CACHE = 'piink-v6';
 const SHELL = ['/', '/manifest.json', '/static/icon.png'];
 
 self.addEventListener('install', e => {
