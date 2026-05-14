@@ -181,7 +181,7 @@
         );
       };
 
-      const DevicePreview = ({ pal, image, orientation='landscape', wifi='--', uptime='--' }) => {
+      const DevicePreview = ({ pal, image, orientation='landscape', wifi='--', uptime='--', online=null }) => {
         const isP = orientation === 'portrait';
         const w = isP ? 168 : 240;
         const h = isP ? 240 : 156;
@@ -215,8 +215,10 @@
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, color:pal.sub }}>
-              <span style={{ width:6, height:6, borderRadius:99, background:'#22c55e' }} />
-              <span style={{ fontFamily:'Geist Mono,monospace', letterSpacing:0.5, textTransform:'uppercase', fontSize:10 }}>online · {uptime}</span>
+              <span style={{ width:6, height:6, borderRadius:99, background: online === false ? '#ef4444' : '#22c55e' }} />
+              <span style={{ fontFamily:'Geist Mono,monospace', letterSpacing:0.5, textTransform:'uppercase', fontSize:10 }}>
+                {online === false ? 'offline · reconnecting' : `online · ${uptime}`}
+              </span>
             </div>
           </div>
         );
@@ -248,7 +250,7 @@
       );
 
       // ── HOME ─────────────────────────────────────────────────────────────────────
-      const Home = ({ pal, onOpen, onPower, state, queueCount }) => {
+      const Home = ({ pal, onOpen, onPower, state, queueCount, online }) => {
         const today = new Date().toLocaleDateString('en',{ weekday:'long', month:'short', day:'numeric' });
         return (
           <div style={{ padding:'8px 22px 48px', display:'flex', flexDirection:'column', gap:26 }}>
@@ -274,7 +276,7 @@
             {/* device card */}
             <div style={{ position:'relative', borderRadius:20, padding:'28px 18px 22px', background:pal.surf, border:`1px solid ${pal.line}`, overflow:'hidden' }}>
               <HalftoneBg color={pal.ink} opacity={0.05} size={5} />
-              <DevicePreview pal={pal} image={state.image} orientation={state.orientation} wifi={state.wifi} uptime={state.uptime} />
+              <DevicePreview pal={pal} image={state.image} orientation={state.orientation} wifi={state.wifi} uptime={state.uptime} online={online} />
             </div>
 
             {/* actions */}
@@ -848,7 +850,7 @@
           <div style={{ width:'100%', background:pal.bg, color:pal.ink, position:'relative' }}>
             <HalftoneBg color={pal.ink} opacity={0.025} size={6} />
             <div style={{ position:'relative', overflowY: sheet ? 'hidden' : 'auto', minHeight:'100vh' }}>
-              {screen === 'home' && <Home pal={pal} onOpen={k=>setSheet(k)} onPower={()=>setSheet('power')} state={state} queueCount={queue.items.length}/>}
+              {screen === 'home' && <Home pal={pal} onOpen={k=>setSheet(k)} onPower={()=>setSheet('power')} state={state} queueCount={queue.items.length} online={online}/>}
             </div>
 
             {screen === 'crop' && cropData && (
@@ -890,20 +892,6 @@
             )}
 
             {loading && <Loading pal={pal} message={loadMsg} sub={loadSub}/>}
-
-            {online === false && (
-              <div style={{
-                position:'fixed', top:0, left:0, right:0, zIndex:150,
-                background:'#1a1a1a', color:'#f5f5f5',
-                display:'flex', alignItems:'center', justifyContent:'center', gap:8,
-                padding:'10px 16px', fontSize:13, fontFamily:'Geist,sans-serif',
-              }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{opacity:0.7,flexShrink:0}}>
-                  <line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
-                </svg>
-                <span>Frame offline · reconnecting…</span>
-              </div>
-            )}
 
             {toast && (
               <div style={{
