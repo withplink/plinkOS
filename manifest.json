@@ -1,6 +1,6 @@
 {
-  "name": "Piink",
-  "short_name": "Piink",
+  "name": "Plink",
+  "short_name": "Plink",
   "description": "e-ink photo frame companion",
   "start_url": "/",
   "display": "standalone",

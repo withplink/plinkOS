@@ -51,7 +51,7 @@ def add_cors(response):
 
 def handleButton(pin):
     if(pin == 5):
-        print("--A-- Pressed: Show PiInk info")
+        print("--A-- Pressed: Show Plink info")
         generateInfo.infoGen(inky_display.width,inky_display.height)
         updateEink("infoImage.png",0,"")
     elif(pin == 6):
@@ -512,8 +512,8 @@ def uploaded_file(filename):
 
 
 _MANIFEST = json.dumps({
-    "name": "Piink",
-    "short_name": "Piink",
+    "name": "Plink",
+    "short_name": "Plink",
     "description": "e-ink photo frame companion",
     "start_url": "/",
     "display": "standalone",
@@ -538,7 +538,7 @@ def manifest():
 
 
 _SW = r"""
-const CACHE = 'piink-v6';
+const CACHE = 'plink-v1';
 const SHELL = ['/', '/manifest.json', '/static/icon.png'];
 
 self.addEventListener('install', e => {
