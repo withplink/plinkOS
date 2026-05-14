@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Pilnk</title>
+    <title>Piink</title>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Pilnk" />
+    <meta name="apple-mobile-web-app-title" content="Piink" />
     <meta name="theme-color" content="#d46b7a" />
     <link rel="apple-touch-icon" href="/static/icon.png" />
     <link rel="icon" type="image/png" href="/static/icon.png" />
-    <link rel="manifest" href="/static/manifest.json" />
+    <link rel="manifest" href="/manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -657,6 +657,8 @@
 
         const [state, setState] = useState({ image: null, orientation: 'landscape', wifi: '--', uptime: '--' });
         const [queue, setQueue]   = useState({ items: [], current: 0, interval: 0 });
+        const [toast, setToast]   = useState('');
+        const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
         // Lock body scroll when a sheet/modal is open
         useEffect(() => {
@@ -675,7 +677,13 @@
           fetch('/api/queue').then(r=>r.json()).then(setQueue).catch(()=>{});
         };
 
-        useEffect(() => { refreshAll(); }, []);
+        useEffect(() => {
+          refreshAll();
+          if (new URLSearchParams(window.location.search).get('shared') === '1') {
+            window.history.replaceState({}, '', '/');
+            showToast('Photo added to queue');
+          }
+        }, []);
 
         const doUpload = async (fd) => {
           const showNow = fd.get('show_now') === '1';
@@ -870,6 +878,16 @@
             )}
 
             {loading && <Loading pal={pal} message={loadMsg} sub={loadSub}/>}
+
+            {toast && (
+              <div style={{
+                position:'fixed', bottom:32, left:'50%', transform:'translateX(-50%)',
+                background:pal.ink, color:pal.bg, borderRadius:20, padding:'10px 20px',
+                fontSize:13, fontFamily:'Geist,sans-serif', zIndex:200,
+                whiteSpace:'nowrap', pointerEvents:'none',
+                boxShadow:'0 4px 20px rgba(0,0,0,0.25)',
+              }}>{toast}</div>
+            )}
           </div>
         );
       }

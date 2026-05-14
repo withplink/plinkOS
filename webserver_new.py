@@ -494,6 +494,59 @@ def rotateImage(deg):
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'],filename)
 
+
+_MANIFEST = json.dumps({
+    "name": "Piink",
+    "short_name": "Piink",
+    "description": "e-ink photo frame companion",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#d46b7a",
+    "theme_color": "#d46b7a",
+    "icons": [
+        {"src": "/static/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+    ],
+    "share_target": {
+        "action": "/share-target",
+        "method": "POST",
+        "enctype": "multipart/form-data",
+        "params": {
+            "files": [{"name": "file", "accept": ["image/jpeg", "image/png", "image/gif", "image/webp"]}]
+        }
+    }
+})
+
+@app.route('/manifest.json')
+def manifest():
+    return app.response_class(_MANIFEST, mimetype='application/manifest+json')
+
+
+@app.route('/share-target', methods=['GET', 'POST'])
+def share_target():
+    if request.method == 'POST':
+        try:
+            file = request.files.get('file')
+            if file and file.filename and allowed_file(file.filename):
+                q = load_queue()
+                ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
+                filename = ts + secure_filename(file.filename)
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                label = file.filename.rsplit('.', 1)[0]
+                item = {"filename": filename, "label": label, "added_at": datetime.now().isoformat()}
+                q["items"].append(item)
+                new_idx = len(q["items"]) - 1
+                was_empty = new_idx == 0
+                if was_empty:
+                    q["current"] = 0
+                save_queue(q)
+                if was_empty:
+                    threading.Thread(target=_show_queue_item, args=(q, 0), daemon=True).start()
+                _schedule_rotate()
+        except Exception as e:
+            print("share-target error:", e)
+    return redirect('/?shared=1')
+
+
 for pin in BUTTONS:
         GPIO.add_event_detect(pin, GPIO.FALLING, handleButton, bouncetime=250)
 
