@@ -522,24 +522,24 @@ def manifest():
 
 
 _SW = r"""
-const CACHE = 'piink-v4';
-const SHELL = ['/', '/manifest.json', '/sw.js', '/static/icon.png'];
+const CACHE = 'piink-v5';
+const SHELL = ['/', '/manifest.json', '/static/icon.png'];
 
 self.addEventListener('install', e => {
-  self.skipWaiting();
+  // Cache while Pi is reachable (user just loaded the page).
+  // skipWaiting only after caching so the SW activates ready.
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => Promise.all(SHELL.map(url => c.add(url).catch(() => {}))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
-  // After claiming clients, fetch and cache the app shell immediately.
-  // This fires on the same page load that registered the SW, so the Pi
-  // is reachable and the cache gets populated before the user ever goes offline.
   e.waitUntil(
     caches.keys()
       .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => clients.claim())
-      .then(() => caches.open(CACHE).then(c =>
-        Promise.all(SHELL.map(url => c.add(url).catch(() => {})))
-      ))
+      .then(() => self.clients.claim())
   );
 });
 
@@ -554,8 +554,7 @@ self.addEventListener('fetch', e => {
     e.respondWith(
       fetch(request)
         .then(r => {
-          // Cache the page every time it loads successfully
-          caches.open(CACHE).then(c => c.put('/', r.clone()));
+          if (r.ok) caches.open(CACHE).then(c => c.put('/', r.clone()));
           return r;
         })
         .catch(() => caches.match('/'))
@@ -566,7 +565,7 @@ self.addEventListener('fetch', e => {
   if (url.pathname.startsWith('/static/') || url.pathname === '/manifest.json') {
     e.respondWith(
       caches.match(request).then(cached => cached || fetch(request).then(r => {
-        caches.open(CACHE).then(c => c.put(request, r.clone()));
+        if (r.ok) caches.open(CACHE).then(c => c.put(request, r.clone()));
         return r;
       }))
     );
