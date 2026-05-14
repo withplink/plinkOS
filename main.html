@@ -181,7 +181,7 @@
         );
       };
 
-      const DevicePreview = ({ pal, image, orientation='landscape', wifi='--', uptime='--', online=null }) => {
+      const DevicePreview = ({ pal, image, orientation='landscape', wifi='--', uptime='--', online=null, tailscaleAvail=false }) => {
         const isP = orientation === 'portrait';
         const w = isP ? 168 : 240;
         const h = isP ? 240 : 156;
@@ -214,11 +214,20 @@
                 <span style={{ fontFamily:'Geist Mono,monospace', fontSize:9, color:pal.sub }}>{wifi}</span>
               </div>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:8, color:pal.sub }}>
-              <span style={{ width:6, height:6, borderRadius:99, background: online === false ? '#ef4444' : '#22c55e' }} />
-              <span style={{ fontFamily:'Geist Mono,monospace', letterSpacing:0.5, textTransform:'uppercase', fontSize:10 }}>
-                {online === false ? 'offline · reconnecting' : `online · ${uptime}`}
-              </span>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, color:pal.sub }}>
+                <span style={{ width:6, height:6, borderRadius:99, background: online === false ? '#ef4444' : '#22c55e' }} />
+                <span style={{ fontFamily:'Geist Mono,monospace', letterSpacing:0.5, textTransform:'uppercase', fontSize:10 }}>
+                  {online === false
+                    ? window.location.protocol === 'https:'
+                      ? <span>offline · <a href="http://pi.local" style={{ color:pal.accent, textDecoration:'none' }}>pi.local ↗</a></span>
+                      : 'offline · reconnecting'
+                    : `online · ${uptime}`}
+                </span>
+              </div>
+              {tailscaleAvail && (
+                <a href="https://pi.tail4e929d.ts.net" style={{ fontFamily:'Geist Mono,monospace', fontSize:9, letterSpacing:0.5, textTransform:'uppercase', color:pal.accent, textDecoration:'none' }}>switch to tailscale ↗</a>
+              )}
             </div>
           </div>
         );
@@ -250,7 +259,7 @@
       );
 
       // ── HOME ─────────────────────────────────────────────────────────────────────
-      const Home = ({ pal, onOpen, onPower, state, queueCount, online }) => {
+      const Home = ({ pal, onOpen, onPower, state, queueCount, online, tailscaleAvail }) => {
         const today = new Date().toLocaleDateString('en',{ weekday:'long', month:'short', day:'numeric' });
         return (
           <div style={{ padding:'8px 22px 48px', display:'flex', flexDirection:'column', gap:26 }}>
@@ -276,7 +285,7 @@
             {/* device card */}
             <div style={{ position:'relative', borderRadius:20, padding:'28px 18px 22px', background:pal.surf, border:`1px solid ${pal.line}`, overflow:'hidden' }}>
               <HalftoneBg color={pal.ink} opacity={0.05} size={5} />
-              <DevicePreview pal={pal} image={state.image} orientation={state.orientation} wifi={state.wifi} uptime={state.uptime} online={online} />
+              <DevicePreview pal={pal} image={state.image} orientation={state.orientation} wifi={state.wifi} uptime={state.uptime} online={online} tailscaleAvail={tailscaleAvail} />
             </div>
 
             {/* actions */}
@@ -661,11 +670,8 @@
         const [queue, setQueue]   = useState({ items: [], current: 0, interval: 0 });
         const [toast, setToast]   = useState('');
         const [online, setOnline] = useState(null); // null=unknown, true=connected, false=offline
+        const [tailscaleAvail, setTailscaleAvail] = useState(false);
         const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
-
-        const apiBase = useRef('');
-        const api = (path, opts) => fetch(apiBase.current + path, opts);
-        const imgSrc = (path) => path ? apiBase.current + path + '?t=' + Date.now() : null;
 
         // Lock body scroll when a sheet/modal is open
         useEffect(() => {
@@ -674,27 +680,20 @@
         }, [sheet]);
 
         const refreshAll = () => {
-          const tryBase = (base) =>
-            fetch(base + '/api/status').then(r => { if (!r.ok) throw 0; return r.json(); });
-          const bases = window.location.hostname === 'pi.local' ? [''] : ['', 'http://pi.local'];
-          const attempt = (i) => {
-            if (i >= bases.length) { setOnline(false); return; }
-            tryBase(bases[i])
-              .then(d => {
-                apiBase.current = bases[i];
-                setOnline(true);
-                setState(s => ({
-                  ...s,
-                  image: imgSrc(d.image_url) || s.image,
-                  orientation: d.orientation || 'landscape',
-                  wifi: d.wifi || '--',
-                  uptime: d.uptime || '--',
-                }));
-                fetch(apiBase.current + '/api/queue').then(r=>r.json()).then(setQueue).catch(()=>{});
-              })
-              .catch(() => attempt(i + 1));
-          };
-          attempt(0);
+          fetch('/api/status')
+            .then(r => { if (!r.ok) throw 0; return r.json(); })
+            .then(d => {
+              setOnline(true);
+              setState(s => ({
+                ...s,
+                image: d.image_url ? d.image_url + '?t=' + Date.now() : s.image,
+                orientation: d.orientation || 'landscape',
+                wifi: d.wifi || '--',
+                uptime: d.uptime || '--',
+              }));
+              fetch('/api/queue').then(r=>r.json()).then(setQueue).catch(()=>{});
+            })
+            .catch(() => setOnline(false));
         };
 
         // Retry every 8 seconds while offline
@@ -711,6 +710,11 @@
             window.history.replaceState({}, '', '/');
             showToast('Photo added to queue');
           }
+          if (window.location.hostname === 'pi.local') {
+            fetch('https://pi.tail4e929d.ts.net/api/status', { signal: AbortSignal.timeout(4000) })
+              .then(r => { if (r.ok) setTailscaleAvail(true); })
+              .catch(() => {});
+          }
         }, []);
 
         const doUpload = async (fd) => {
@@ -719,12 +723,12 @@
           setLoadMsg(showNow ? 'Sending to display…' : 'Adding to queue…');
           setLoadSub(showNow ? 'E-ink refresh · ~30 s' : '');
           try {
-            const r = await api('/api/queue/add', { method:'POST', body:fd });
+            const r = await fetch('/api/queue/add', { method:'POST', body:fd });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
               if (showNow && d.image_url) {
-                setState(s => ({ ...s, image: imgSrc(d.image_url) }));
+                setState(s => ({ ...s, image: d.image_url + '?t=' + Date.now() }));
               }
             } else { alert('Upload failed: ' + (d.error || 'unknown')); }
           } catch(e) { alert('Upload error: ' + e.message); }
@@ -738,11 +742,11 @@
           if (isReboot)   { setLoading(true); setLoadMsg('Restarting…');     setLoadSub('Reconnecting when Pi is back…'); }
           if (isShutdown) { setLoading(true); setLoadMsg('Shutting down…');  setLoadSub('Power off the Pi safely'); }
           const fd = new FormData(); fd.append('action', action);
-          try { await api('/api/action', { method:'POST', body:fd }); } catch(e) {}
+          try { await fetch('/api/action', { method:'POST', body:fd }); } catch(e) {}
           if (isReboot) {
             // Poll until the Pi responds, then reload
             const poll = () => {
-              api('/api/status', { signal: AbortSignal.timeout(3000) })
+              fetch('/api/status', { signal: AbortSignal.timeout(3000) })
                 .then(() => window.location.reload())
                 .catch(() => setTimeout(poll, 2000));
             };
@@ -778,7 +782,7 @@
           setState(prev => {
             const next = typeof updater === 'function' ? updater(prev) : updater;
             if (next.orientation !== prev.orientation) {
-              api('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orientation: next.orientation }) }).catch(()=>{});
+              fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orientation: next.orientation }) }).catch(()=>{});
             }
             return next;
           });
@@ -788,9 +792,9 @@
           setSheet(null); setLoading(true); setLoadMsg('Rotating…'); setLoadSub('E-ink refresh · ~30 s');
           const fd = new FormData(); fd.append('action','rotate');
           try {
-            const r = await api('/api/action', { method:'POST', body:fd });
+            const r = await fetch('/api/action', { method:'POST', body:fd });
             const d = await r.json();
-            if (d.ok && d.image_url) setState(s => ({ ...s, image: imgSrc(d.image_url) }));
+            if (d.ok && d.image_url) setState(s => ({ ...s, image: d.image_url + '?t=' + Date.now() }));
           } catch(e) {}
           setLoading(false);
         };
@@ -798,7 +802,7 @@
         const handleClearGhost = async () => {
           setSheet(null); setLoading(true); setLoadMsg('Clearing ghosting…'); setLoadSub('E-ink refresh · ~60 s');
           const fd = new FormData(); fd.append('action','clear_ghost');
-          try { await api('/api/action', { method:'POST', body:fd }); } catch(e) {}
+          try { await fetch('/api/action', { method:'POST', body:fd }); } catch(e) {}
           setLoading(false);
         };
 
@@ -815,13 +819,13 @@
           }
 
           try {
-            const r = await api('/api/queue/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
+            const r = await fetch('/api/queue/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
               if (showEinkLoader) {
                 const newItem = d.queue.items[d.queue.current];
-                if (newItem) setState(s => ({ ...s, image: imgSrc('/uploads/' + newItem.filename) }));
+                if (newItem) setState(s => ({ ...s, image: '/uploads/' + newItem.filename + '?t=' + Date.now() }));
               }
             }
           } catch(e) {}
@@ -831,7 +835,7 @@
           setSheet(null);
           setLoading(true); setLoadMsg('Next photo…'); setLoadSub('E-ink refresh · ~30 s');
           try {
-            const r = await api('/api/queue/next', { method:'POST' });
+            const r = await fetch('/api/queue/next', { method:'POST' });
             const d = await r.json();
             if (d.ok) { setQueue(d.queue); refreshAll(); }
           } catch(e) {}
@@ -842,12 +846,12 @@
           if (idx === queue.current) return;
           setLoading(true); setLoadMsg('Switching photo…'); setLoadSub('E-ink refresh · ~30 s');
           try {
-            const r = await api('/api/queue/show', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
+            const r = await fetch('/api/queue/show', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ index: idx }) });
             const d = await r.json();
             if (d.ok) {
               setQueue(d.queue);
               const item = d.queue.items[idx];
-              if (item) setState(s => ({ ...s, image: imgSrc('/uploads/' + item.filename) }));
+              if (item) setState(s => ({ ...s, image: '/uploads/' + item.filename + '?t=' + Date.now() }));
             }
           } catch(e) {}
           setLoading(false);
@@ -855,7 +859,7 @@
 
         const handleQueueInterval = async (minutes) => {
           try {
-            await api('/api/queue/interval', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ minutes }) });
+            await fetch('/api/queue/interval', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ minutes }) });
             setQueue(q => ({ ...q, interval: minutes }));
           } catch(e) {}
         };
@@ -864,7 +868,7 @@
           <div style={{ width:'100%', background:pal.bg, color:pal.ink, position:'relative' }}>
             <HalftoneBg color={pal.ink} opacity={0.025} size={6} />
             <div style={{ position:'relative', overflowY: sheet ? 'hidden' : 'auto', minHeight:'100vh' }}>
-              {screen === 'home' && <Home pal={pal} onOpen={k=>setSheet(k)} onPower={()=>setSheet('power')} state={state} queueCount={queue.items.length} online={online}/>}
+              {screen === 'home' && <Home pal={pal} onOpen={k=>setSheet(k)} onPower={()=>setSheet('power')} state={state} queueCount={queue.items.length} online={online} tailscaleAvail={tailscaleAvail}/>}
             </div>
 
             {screen === 'crop' && cropData && (
