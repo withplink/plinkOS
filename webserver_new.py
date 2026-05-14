@@ -521,6 +521,56 @@ def manifest():
     return app.response_class(_MANIFEST, mimetype='application/manifest+json')
 
 
+_SW = r"""
+const CACHE = 'piink-v2';
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.add('/')));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => clients.claim())
+  );
+});
+
+self.addEventListener('fetch', e => {
+  const { request } = e;
+  const url = new URL(request.url);
+
+  if (request.method !== 'GET') return;
+  if (url.pathname.startsWith('/api/') || url.pathname === '/share-target') return;
+
+  if (request.mode === 'navigate') {
+    e.respondWith(
+      fetch(request)
+        .then(r => { caches.open(CACHE).then(c => c.put('/', r.clone())); return r; })
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith('/static/') || url.pathname === '/manifest.json') {
+    e.respondWith(
+      caches.match(request).then(cached => cached || fetch(request).then(r => {
+        caches.open(CACHE).then(c => c.put(request, r.clone()));
+        return r;
+      }))
+    );
+  }
+});
+"""
+
+@app.route('/sw.js')
+def service_worker():
+    resp = app.response_class(_SW.strip(), mimetype='application/javascript')
+    resp.headers['Service-Worker-Allowed'] = '/'
+    return resp
+
+
 @app.route('/share-target', methods=['GET', 'POST'])
 def share_target():
     if request.method == 'POST':

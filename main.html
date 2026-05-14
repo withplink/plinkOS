@@ -658,6 +658,7 @@
         const [state, setState] = useState({ image: null, orientation: 'landscape', wifi: '--', uptime: '--' });
         const [queue, setQueue]   = useState({ items: [], current: 0, interval: 0 });
         const [toast, setToast]   = useState('');
+        const [online, setOnline] = useState(null); // null=unknown, true=connected, false=offline
         const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
         // Lock body scroll when a sheet/modal is open
@@ -667,15 +668,26 @@
         }, [sheet]);
 
         const refreshAll = () => {
-          fetch('/api/status').then(r=>r.json()).then(d => setState(s => ({
-            ...s,
-            image: d.image_url ? d.image_url + '?t=' + Date.now() : s.image,
-            orientation: d.orientation || 'landscape',
-            wifi: d.wifi || '--',
-            uptime: d.uptime || '--',
-          }))).catch(()=>{});
+          fetch('/api/status').then(r=>r.json()).then(d => {
+            setOnline(true);
+            setState(s => ({
+              ...s,
+              image: d.image_url ? d.image_url + '?t=' + Date.now() : s.image,
+              orientation: d.orientation || 'landscape',
+              wifi: d.wifi || '--',
+              uptime: d.uptime || '--',
+            }));
+          }).catch(() => setOnline(false));
           fetch('/api/queue').then(r=>r.json()).then(setQueue).catch(()=>{});
         };
+
+        // Retry every 8 seconds while offline
+        useEffect(() => {
+          if (online === false) {
+            const t = setTimeout(refreshAll, 8000);
+            return () => clearTimeout(t);
+          }
+        }, [online]);
 
         useEffect(() => {
           refreshAll();
@@ -879,6 +891,20 @@
 
             {loading && <Loading pal={pal} message={loadMsg} sub={loadSub}/>}
 
+            {online === false && (
+              <div style={{
+                position:'fixed', top:0, left:0, right:0, zIndex:150,
+                background:'#1a1a1a', color:'#f5f5f5',
+                display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+                padding:'10px 16px', fontSize:13, fontFamily:'Geist,sans-serif',
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{opacity:0.7,flexShrink:0}}>
+                  <line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                </svg>
+                <span>Frame offline · reconnecting…</span>
+              </div>
+            )}
+
             {toast && (
               <div style={{
                 position:'fixed', bottom:32, left:'50%', transform:'translateX(-50%)',
@@ -894,6 +920,11 @@
 
       ReactDOM.createRoot(document.getElementById('root')).render(<PilnkApp/>);
       {% endraw %}
+    </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
     </script>
   </body>
 </html>
