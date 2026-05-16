@@ -1,30 +1,32 @@
 # Goal
 
-Mobile-first PWA companion for a Raspberry Pi Zero 2W driving an Inky Impression 7.3" e-ink display. Send photos from your phone, manage a queue, and have the app load even when the Pi is off (cached shell via service worker).
+Raspberry Pi e-ink frame server + PWA for Inky Impression 7.3". Must work over local network (`pi.local`) and Tailscale, including queue management and device actions.
+
+This repo is **Pi/PWA only**.
+- Pi/PWA repo: `PixeledCode/pi-ink`
+- iOS app repo: `PixeledCode/plink-ios` (local path: `/Users/shoaibahmed/code/personal/Plink`)
 
 ---
 
 ## Current State
 
-App is fully working and deployed. Key capabilities:
-- Upload photos → crop → show now or add to queue
-- Queue management: reorder, remove, auto-rotate on interval, manual next
-- Device controls: rotate image, clear ghosting, reboot, shutdown
-- Service worker `plink-v1` caches app shell at install time → app loads offline
-- Status dot auto-detects online/offline every 30s (online) / 8s (offline) — no manual refresh needed
-- **Contextual URL hints:** on Tailscale URL + offline → `offline · pi.local ↗`. On `pi.local` + Tailscale reachable → `switch to tailscale ↗` below dot.
+### PWA + backend (working)
+- Upload photos, crop, show-now or add-to-queue
+- Queue operations: list, remove, manual next, interval rotation
+- Device actions: rotate image, clear ghosting, reboot, shutdown
+- Status polling with offline detection (fast retry when offline)
+- Contextual host hints between `pi.local` and Tailscale URL
+- Service worker app-shell caching on HTTPS/Tailscale
 
-Pi is accessible two ways:
-- `http://pi.local` — local WiFi, mDNS
-- `https://pi.tail4e929d.ts.net` — Tailscale VPN (Tailscale must be on)
-
-Tailscale auto-starts on boot (`tailscaled` is enabled), but takes ~90s after power-on.
+Primary endpoints:
+- `http://pi.local` (mDNS on local Wi‑Fi)
+- `https://pi.tail4e929d.ts.net` (Tailscale)
 
 ---
 
 ## Files in flight
 
-| Local | Deployed to |
+| Local | Deployed on Pi |
 |---|---|
 | `webserver_new.py` | `/home/pi/PiInk/src/webserver.py` |
 | `main.html` | `/home/pi/PiInk/src/templates/main.html` |
@@ -36,31 +38,22 @@ Deploy:
 
 ---
 
-## Recent changes (newest first)
+## Recent changes
 
-**`2c2f053` — Rename to Plink, add deploy script, fix offline detection**
-- App renamed from Piink → Plink everywhere (title, manifest, SW cache name, UI labels, hero copy)
-- `AbortSignal.timeout(5000)` added to `/api/status` fetch — mobile detects offline within ~5s instead of hanging indefinitely
-- Polling made continuous: 30s when online, 8s when offline — status dot flips automatically when Tailscale drops, no manual refresh required
-- SW cache bumped `piink-v7` → `plink-v1` to force fresh re-cache of new shell
-- `deploy.sh` added to root for one-command deploy from Mac
-
-**`dd05a2c` — Replace cross-origin fallback with contextual URL hints**
-Reverted the `apiBase`/`api`/`imgSrc` abstraction. All fetches are plain relative `fetch('/api/...')`. Instead of auto-probing across origins (blocked by mixed content), the status indicator shows a helpful link when offline.
-
-**`0ffe588` — SW v5: move shell caching from activate → install**
-Root fix for iOS offline caching. iOS Safari can kill the SW during `activate`. Moving caching to `install` and calling `skipWaiting()` only after caching completes fixed this.
+- iOS code was removed from this repo so app development can happen in dedicated repo `PixeledCode/plink-ios`.
+- Existing Pi/PWA flow remains the active source for device APIs and browser UI.
 
 ---
 
 ## Known limitations
 
-**`pi.local` slow to resolve after Tailscale VPN is turned off on iOS**
-Tailscale intercepts DNS on iOS. After toggling VPN off, mDNS `.local` resolution and even direct IPs are broken for 30–60s while iOS tears down the VPN tunnel. Not fixable in app code. Potential future fix: include Pi's LAN IP in `/api/status` response, persist in `localStorage`, use IP link instead of `pi.local` (bypasses mDNS entirely).
-
-**SW only works on HTTPS**
-`http://pi.local` doesn't register a service worker (SW requires HTTPS except localhost). Offline caching only works via the Tailscale URL.
+- Service worker caching does not register on plain HTTP (`http://pi.local`); offline shell is effectively for HTTPS/Tailscale route.
+- On iOS, after toggling Tailscale VPN off, `.local` DNS can lag for ~30–60s (OS-level behavior).
 
 ---
 
-## No open tasks
+## Related repo
+
+For native iOS status, features, and open issues, read:
+- Local: `/Users/shoaibahmed/code/personal/Plink/HANDOFF.md`
+- Remote: `git@github.com-pcode:PixeledCode/plink-ios.git`
