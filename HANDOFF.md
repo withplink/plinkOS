@@ -42,6 +42,7 @@ Deploy:
 
 - iOS code was removed from this repo so app development can happen in dedicated repo `PixeledCode/plink-ios`.
 - Existing Pi/PWA flow remains the active source for device APIs and browser UI.
+- Fixed `clearScreen()` and `rotateImage()` both used `os.listdir()[0]` (arbitrary filesystem order) instead of the current queue item — they now read `queue.json` and operate on the correct file.
 
 ---
 

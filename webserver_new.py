@@ -380,6 +380,21 @@ def api_queue_remove():
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
 
+@app.route('/api/queue/reorder', methods=['POST'])
+def api_queue_reorder():
+    data = request.get_json(force=True)
+    new_order = data.get('order', [])
+    q = load_queue()
+    items = q['items']
+    if len(new_order) != len(items) or sorted(new_order) != list(range(len(items))):
+        return app.response_class(json.dumps({'error': 'Invalid order'}), status=400, mimetype='application/json')
+    current = q.get('current', 0)
+    q['items'] = [items[i] for i in new_order]
+    q['current'] = new_order.index(current)
+    save_queue(q)
+    return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
+
+
 @app.route('/api/queue/next', methods=['POST'])
 def api_queue_next():
     q = load_queue()
@@ -485,7 +500,9 @@ def clearScreen():
     clearImage = ImageDraw.Draw(img)
     inky_display.set_image(img)
     inky_display.show()
-    updateEink(os.listdir(app.config['UPLOAD_FOLDER'])[0],ORIENTATION,ADJUST_AR)
+    q = load_queue()
+    if q["items"]:
+        updateEink(q["items"][q["current"]]["filename"], ORIENTATION, ADJUST_AR)
 
 def changeOrientation(img,orientation):
     if orientation == 0:
@@ -519,10 +536,14 @@ def deleteImage():
             os.remove(fp)
 
 def rotateImage(deg):
-    with Image.open(os.path.join(PATH, "img/",os.listdir(app.config['UPLOAD_FOLDER'])[0])) as img:
-        img = img.rotate(deg, Image.NEAREST,expand=1)
-        img = img.save(os.path.join(PATH, "img/",os.listdir(app.config['UPLOAD_FOLDER'])[0]))
-        updateEink(os.listdir(app.config['UPLOAD_FOLDER'])[0],ORIENTATION,ADJUST_AR)
+    q = load_queue()
+    if not q["items"]:
+        return
+    filename = q["items"][q["current"]]["filename"]
+    with Image.open(os.path.join(PATH, "img/", filename)) as img:
+        img = img.rotate(deg, Image.NEAREST, expand=1)
+        img = img.save(os.path.join(PATH, "img/", filename))
+        updateEink(filename, ORIENTATION, ADJUST_AR)
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
