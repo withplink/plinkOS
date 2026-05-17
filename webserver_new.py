@@ -8,9 +8,7 @@ import json
 from inky.auto import auto
 import RPi.GPIO as GPIO
 from PIL import ImageDraw,Image
-import generateInfo
-
-BUTTONS = [5, 6, 16, 24]
+BUTTONS = [6, 16, 24]
 ORIENTATION = 0
 ADJUST_AR = False
 
@@ -50,11 +48,7 @@ def add_cors(response):
     return response
 
 def handleButton(pin):
-    if(pin == 5):
-        print("--A-- Pressed: Show Plink info")
-        generateInfo.infoGen(inky_display.width,inky_display.height)
-        updateEink("infoImage.png",0,"")
-    elif(pin == 6):
+    if(pin == 6):
         print("--B-- Pressed: Rotate image clockwise")
         rotateImage(-90)
     elif(pin == 16):

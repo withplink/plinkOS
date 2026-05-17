@@ -6,7 +6,6 @@ After=network.target
 ExecStart=/usr/bin/python3 /home/pi/PiInk/src/button_listener.py
 Restart=always
 RestartSec=5
-User=pi
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
