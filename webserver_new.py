@@ -217,16 +217,16 @@ def api_action():
         blank = Image.new('RGB', (inky_display.width, inky_display.height), (255, 255, 255))
         inky_display.set_image(blank)
         inky_display.show()
-        imgs = [i for i in os.listdir(app.config['UPLOAD_FOLDER']) if not i.startswith('.')]
-        if imgs:
-            updateEink(imgs[0], orientation, True)
+        q = load_queue()
+        if q["items"]:
+            updateEink(q["items"][q["current"]]["filename"], orientation, True)
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
 
     elif action == 'rotate':
-        imgs = [i for i in os.listdir(app.config['UPLOAD_FOLDER']) if not i.startswith('.')]
-        if not imgs:
+        q = load_queue()
+        if not q["items"]:
             return app.response_class(json.dumps({'error': 'No image to rotate'}), status=400, mimetype='application/json')
-        fname = imgs[0]
+        fname = q["items"][q["current"]]["filename"]
         fpath = os.path.join(PATH, 'img', fname)
         with Image.open(fpath) as img:
             rotated = img.rotate(-90, Image.NEAREST, expand=1)
