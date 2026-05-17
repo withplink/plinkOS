@@ -29,6 +29,7 @@ if [ -f "$FLAG" ]; then
     rm -f "$FLAG"
 
     python3 "$SHOW_SCREEN" client
+    systemctl restart avahi-daemon
 else
     echo "WiFi client mode — switching to AP mode"
 
@@ -63,4 +64,5 @@ EOF
     touch "$FLAG"
 
     python3 "$SHOW_SCREEN" ap "$AP_PASS"
+    systemctl restart avahi-daemon
 fi

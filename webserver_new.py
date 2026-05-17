@@ -1,4 +1,4 @@
-import os,random,time,signal,subprocess,threading,socket
+import os,random,time,signal,subprocess,threading
 from flask import Flask, flash, request, redirect, url_for,render_template
 from werkzeug.utils import secure_filename
 from flask import send_from_directory
@@ -657,40 +657,6 @@ def share_target():
 
 for pin in BUTTONS:
         GPIO.add_event_detect(pin, GPIO.FALLING, handleButton, bouncetime=250)
-
-# ── Bonjour/mDNS advertisement (zeroconf) ─────────────────────────────────────
-# Allows the iOS app to discover this frame automatically on the local network.
-# Install: pip install zeroconf
-def _get_lan_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
-
-_LAN_IP = _get_lan_ip()
-
-def _start_bonjour():
-    try:
-        from zeroconf import ServiceInfo, Zeroconf
-        hostname = socket.gethostname()
-        zc = Zeroconf()
-        info = ServiceInfo(
-            "_plink._tcp.local.",
-            f"{hostname}._plink._tcp.local.",
-            addresses=[socket.inet_aton(_LAN_IP)],
-            port=80,
-            properties={"version": b"1", "name": hostname.encode()},
-        )
-        zc.register_service(info)
-        print(f"Bonjour: advertising _plink._tcp as {hostname} on {_LAN_IP}:80")
-    except Exception as e:
-        print(f"Bonjour: unavailable ({e}) — install with: pip install zeroconf")
-
-threading.Thread(target=_start_bonjour, daemon=True).start()
 
 if __name__ == '__main__':
     app.secret_key = str(random.randint(100000,999999))

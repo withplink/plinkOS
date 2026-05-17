@@ -30,6 +30,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable plink-buttons
 sudo systemctl restart plink-buttons
 
+echo "=== Installing Avahi service ==="
+sudo cp plink.avahi.service /etc/avahi/services/plink.service
+sudo systemctl restart avahi-daemon
+
 echo ""
 echo "Done. Hold Button A on the frame for 1.5s to toggle hotspot mode."
 echo "The QR code on the display encodes the WiFi join info for iPhone."
