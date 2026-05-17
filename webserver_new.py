@@ -167,7 +167,7 @@ def api_status():
     orientation = 'landscape' if horiz == 'checked' else 'portrait'
 
     return app.response_class(
-        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'lan_ip': _LAN_IP}),
+        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation}),
         mimetype='application/json'
     )
 
