@@ -502,7 +502,7 @@ def changeOrientation(img,orientation):
     if orientation == 0:
         img = img.rotate(0)
     elif orientation == 1:
-        img = img.rotate(90)
+        img = img.rotate(90, expand=True)
     return img
 
 def adjustAspectRatio(img,adjustARBool):
@@ -510,17 +510,17 @@ def adjustAspectRatio(img,adjustARBool):
     h = inky_display.height
     ratioWidth = w / img.width
     ratioHeight = h / img.height
-    if ratioWidth < ratioHeight:
+    # object-fit: cover — scale up to fill, then center-crop
+    if ratioWidth > ratioHeight:
         resizedWidth = w
         resizedHeight = round(ratioWidth * img.height)
     else:
         resizedWidth = round(ratioHeight * img.width)
         resizedHeight = h
     imgResized = img.resize((resizedWidth, resizedHeight), Image.LANCZOS)
-    background = Image.new('RGB', (w, h), (255, 255, 255))
-    offset = (round((w - resizedWidth) / 2), round((h - resizedHeight) / 2))
-    background.paste(imgResized, offset)
-    return background
+    left = round((resizedWidth - w) / 2)
+    top = round((resizedHeight - h) / 2)
+    return imgResized.crop((left, top, left + w, top + h))
 
 def deleteImage():
     img_directory = os.path.join(PATH, "img")
