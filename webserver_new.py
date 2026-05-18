@@ -56,7 +56,7 @@ def handleButton(pin):
         rotateImage(90)
     elif(pin == 24):
         print("--D-- Pressed: Reboot the Pi")
-        os.system('sudo reboot')
+        subprocess.Popen(['sudo', 'reboot'], start_new_session=True)
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -97,9 +97,9 @@ def upload_file():
                     flash("Error: Unsupported Media or Invalid Link!")
                     return render_template('main.html')
         if request.form.get("submit") == 'Reboot':
-            os.system("sudo reboot")
+            subprocess.Popen(['sudo', 'reboot'], start_new_session=True)
         if request.form.get("submit") == 'Shutdown':
-            os.system("sudo shutdown")
+            subprocess.Popen(['sudo', 'shutdown', 'now'], start_new_session=True)
         if request.form.get("submit") == 'rotateImage':
             rotateImage(-90)
         if request.form.get("submit") == 'clearGhost':
@@ -200,11 +200,11 @@ def api_action():
     orientation = 0 if horiz == 'checked' else 1
 
     if action == 'reboot':
-        os.system('sudo reboot &')
+        subprocess.Popen(['sudo', 'reboot'], start_new_session=True)
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
 
     elif action == 'shutdown':
-        os.system('sudo shutdown now &')
+        subprocess.Popen(['sudo', 'shutdown', 'now'], start_new_session=True)
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
 
     elif action == 'clear_ghost':
@@ -249,6 +249,7 @@ def api_settings():
 QUEUE_FILE = os.path.join(PATH, "config/queue.json")
 _rotate_timer = None
 _rotate_lock  = threading.Lock()
+_next_rotate_at = None
 
 def load_queue():
     try:
@@ -274,7 +275,7 @@ def _show_queue_item(q, idx):
         print(f"Queue display error: {e}")
 
 def _schedule_rotate():
-    global _rotate_timer
+    global _rotate_timer, _next_rotate_at
     with _rotate_lock:
         if _rotate_timer:
             _rotate_timer.cancel()
@@ -282,9 +283,12 @@ def _schedule_rotate():
         q = load_queue()
         interval = q.get("interval", 0)
         if interval > 0 and len(q["items"]) > 1:
+            _next_rotate_at = time.time() + interval * 60
             _rotate_timer = threading.Timer(interval * 60, _do_rotate)
             _rotate_timer.daemon = True
             _rotate_timer.start()
+        else:
+            _next_rotate_at = None
 
 def _do_rotate():
     q = load_queue()
@@ -298,7 +302,10 @@ def _do_rotate():
 
 @app.route('/api/queue', methods=['GET'])
 def api_queue_get():
-    return app.response_class(json.dumps(load_queue()), mimetype='application/json')
+    q = load_queue()
+    if _next_rotate_at is not None:
+        q['next_rotate_at'] = _next_rotate_at
+    return app.response_class(json.dumps(q), mimetype='application/json')
 
 
 @app.route('/api/queue/add', methods=['POST'])
@@ -316,8 +323,18 @@ def api_queue_add():
         else:
             return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
 
+        orig_filename = None
+        if 'original' in request.files and request.files['original'].filename:
+            orig_file = request.files['original']
+            if allowed_file(orig_file.filename):
+                orig_ts = datetime.now().strftime('%Y%m%d_%H%M%S_orig_')
+                orig_filename = orig_ts + secure_filename(orig_file.filename)
+                orig_file.save(os.path.join(app.config['UPLOAD_FOLDER'], orig_filename))
+
         show_now = request.form.get('show_now') == '1'
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
+        if orig_filename:
+            item["orig_filename"] = orig_filename
         q["items"].append(item)
         new_idx = len(q["items"]) - 1
         was_empty = new_idx == 0
@@ -354,6 +371,11 @@ def api_queue_remove():
                 fp = os.path.join(app.config['UPLOAD_FOLDER'], item["filename"])
                 if os.path.isfile(fp):
                     os.remove(fp)
+                orig_fp = item.get("orig_filename")
+                if orig_fp:
+                    ofp = os.path.join(app.config['UPLOAD_FOLDER'], orig_fp)
+                    if os.path.isfile(ofp):
+                        os.remove(ofp)
 
         # Adjust current pointer correctly
         if idx < old_current:
@@ -387,6 +409,63 @@ def api_queue_reorder():
     q['current'] = new_order.index(current)
     save_queue(q)
     return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
+
+
+@app.route('/api/queue/replace', methods=['POST'])
+def api_queue_replace():
+    q = load_queue()
+    try:
+        idx = int(request.form.get('index', -1))
+        if idx < 0 or idx >= len(q["items"]):
+            return app.response_class(json.dumps({'error': 'Invalid index'}), status=400, mimetype='application/json')
+
+        old_item = q["items"][idx]
+
+        if 'file' not in request.files or not request.files['file'].filename:
+            return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
+
+        file = request.files['file']
+        if not allowed_file(file.filename):
+            return app.response_class(json.dumps({'error': 'Unsupported file type'}), status=400, mimetype='application/json')
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
+        filename = ts + secure_filename(file.filename)
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+        orig_filename = None
+        if 'original' in request.files and request.files['original'].filename:
+            orig_file = request.files['original']
+            if allowed_file(orig_file.filename):
+                orig_ts = datetime.now().strftime('%Y%m%d_%H%M%S_orig_')
+                orig_filename = orig_ts + secure_filename(orig_file.filename)
+                orig_file.save(os.path.join(app.config['UPLOAD_FOLDER'], orig_filename))
+
+        # Delete old files
+        old_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_item["filename"])
+        if os.path.isfile(old_fp):
+            os.remove(old_fp)
+        old_orig = old_item.get("orig_filename")
+        if old_orig:
+            old_orig_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_orig)
+            if os.path.isfile(old_orig_fp):
+                os.remove(old_orig_fp)
+
+        new_item = {
+            "filename": filename,
+            "label": old_item.get("label", filename),
+            "added_at": old_item.get("added_at", datetime.now().isoformat())
+        }
+        if orig_filename:
+            new_item["orig_filename"] = orig_filename
+        q["items"][idx] = new_item
+        save_queue(q)
+
+        if idx == q.get("current", 0):
+            _show_queue_item(q, idx)
+
+        _schedule_rotate()
+        return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
+    except Exception as e:
+        return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
 
 @app.route('/api/queue/next', methods=['POST'])
