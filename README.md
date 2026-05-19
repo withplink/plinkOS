@@ -32,26 +32,34 @@ Send a moment to your plink.
 
 ## Setup
 
-1. Clone onto the Pi:
-   ```bash
-   git clone https://github.com/PixeledCode/pi-ink /home/pi/PiInk
-   ```
+### Flash
 
-2. Install dependencies:
-   ```bash
-   pip install flask pillow inky
-   ```
+Use Raspberry Pi Imager with **Pi OS Lite (Bookworm 64-bit)**. In the advanced settings:
 
-3. Copy files to their expected paths:
-   - `webserver_new.py` → `/home/pi/PiInk/src/webserver.py`
-   - `main.html` → `/home/pi/PiInk/src/templates/main.html`
+- Hostname: `pi`
+- User: `pi`, password: `5409`
+- WiFi: your home network
+- Enable SSH
 
-4. Run:
-   ```bash
-   sudo python /home/pi/PiInk/src/webserver.py
-   ```
+### First-boot setup (run from Mac)
 
-   Or set up as a systemd service for auto-start on boot.
+Make sure `sshpass` is installed (`brew install sshpass`), then from the repo root:
+
+```bash
+bash pi-scripts/first-boot-setup.sh
+```
+
+This script waits for the Pi to come online, then:
+- Sets static IP `192.168.1.50`
+- Enables link-local IPv6 (required for iOS Bonjour discovery)
+- Disables WiFi power save
+- Installs Python + system deps
+- Deploys `webserver_new.py` and `main.html`
+- Installs all systemd services (`piink`, `plink-buttons`, `plink-boot-check`)
+- Installs Avahi mDNS service
+- Starts the frame server
+
+Frame is live at `http://pi.local` when done.
 
 ## Deploying changes
 
