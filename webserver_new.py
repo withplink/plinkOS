@@ -167,7 +167,7 @@ def api_status():
     orientation = 'landscape' if horiz == 'checked' else 'portrait'
 
     return app.response_class(
-        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation}),
+        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering}),
         mimetype='application/json'
     )
 
@@ -208,12 +208,7 @@ def api_action():
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
 
     elif action == 'clear_ghost':
-        blank = Image.new('RGB', (inky_display.width, inky_display.height), (255, 255, 255))
-        inky_display.set_image(blank)
-        inky_display.show()
-        q = load_queue()
-        if q["items"]:
-            updateEink(q["items"][q["current"]]["filename"], orientation, True)
+        threading.Thread(target=_do_clear_ghost, args=(orientation,), daemon=True).start()
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
 
     elif action == 'rotate':
@@ -225,7 +220,7 @@ def api_action():
         with Image.open(fpath) as img:
             rotated = img.rotate(-90, Image.NEAREST, expand=1)
             rotated.save(fpath)
-        updateEink(fname, orientation, True)
+        threading.Thread(target=_show_queue_item, args=(q, q["current"]), daemon=True).start()
         return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + fname}), mimetype='application/json')
 
     return app.response_class(json.dumps({'error': 'Unknown action'}), status=400, mimetype='application/json')
@@ -250,6 +245,14 @@ QUEUE_FILE = os.path.join(PATH, "config/queue.json")
 _rotate_timer = None
 _rotate_lock  = threading.Lock()
 _next_rotate_at = None
+
+_is_rendering = False
+_render_lock  = threading.Lock()
+
+def _set_rendering(val):
+    global _is_rendering
+    with _render_lock:
+        _is_rendering = val
 
 def load_queue():
     try:
@@ -299,6 +302,18 @@ def _do_rotate():
     _show_queue_item(q, q["current"])
     _schedule_rotate()
 
+def _do_clear_ghost(orientation):
+    _set_rendering(True)
+    try:
+        blank = Image.new('RGB', (inky_display.width, inky_display.height), (255, 255, 255))
+        inky_display.set_image(blank)
+        inky_display.show()
+        q = load_queue()
+        if q["items"]:
+            updateEink(q["items"][q["current"]]["filename"], orientation, True, _manage_busy=False)
+    finally:
+        _set_rendering(False)
+
 
 @app.route('/api/queue', methods=['GET'])
 def api_queue_get():
@@ -335,16 +350,22 @@ def api_queue_add():
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
         if orig_filename:
             item["orig_filename"] = orig_filename
-        q["items"].append(item)
-        new_idx = len(q["items"]) - 1
-        was_empty = new_idx == 0
+        was_empty = len(q["items"]) == 0
 
-        if was_empty or show_now:
+        if show_now or was_empty:
+            q["items"].append(item)
+            new_idx = len(q["items"]) - 1
             q["current"] = new_idx
+        else:
+            current = q.get("current", 0)
+            q["items"].insert(current, item)
+            new_idx = current
+            q["current"] = current + 1
+
         save_queue(q)
 
         if was_empty or show_now:
-            _show_queue_item(q, new_idx)
+            threading.Thread(target=_show_queue_item, args=(q, new_idx), daemon=True).start()
 
         _schedule_rotate()
         return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename, 'queue': q}), mimetype='application/json')
@@ -460,7 +481,7 @@ def api_queue_replace():
         save_queue(q)
 
         if idx == q.get("current", 0):
-            _show_queue_item(q, idx)
+            threading.Thread(target=_show_queue_item, args=(q, idx), daemon=True).start()
 
         _schedule_rotate()
         return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
@@ -475,7 +496,7 @@ def api_queue_next():
         return app.response_class(json.dumps({'error': 'Queue has only one item'}), status=400, mimetype='application/json')
     q["current"] = (q.get("current", 0) + 1) % len(q["items"])
     save_queue(q)
-    _show_queue_item(q, q["current"])
+    threading.Thread(target=_show_queue_item, args=(q, q["current"]), daemon=True).start()
     _schedule_rotate()
     return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
 
@@ -490,7 +511,7 @@ def api_queue_show():
             return app.response_class(json.dumps({'error': 'Invalid index'}), status=400, mimetype='application/json')
         q["current"] = idx
         save_queue(q)
-        _show_queue_item(q, idx)
+        threading.Thread(target=_show_queue_item, args=(q, idx), daemon=True).start()
         _schedule_rotate()
         return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
     except Exception as e:
@@ -561,12 +582,18 @@ def saveSettings(orientationHorizontal,orientationVertical,adjustAR):
     with open(os.path.join(PATH,"config/settings.json"), "w") as f:
         json.dump(jsonStr, f)
 
-def updateEink(filename,orientation,adjustAR):
-    with Image.open(os.path.join(PATH, "img/",filename)) as img:
-        img = changeOrientation(img,orientation)
-        img = adjustAspectRatio(img,adjustAR)
-        inky_display.set_image(img)
-        inky_display.show()
+def updateEink(filename, orientation, adjustAR, _manage_busy=True):
+    if _manage_busy:
+        _set_rendering(True)
+    try:
+        with Image.open(os.path.join(PATH, "img/", filename)) as img:
+            img = changeOrientation(img, orientation)
+            img = adjustAspectRatio(img, adjustAR)
+            inky_display.set_image(img)
+            inky_display.show()
+    finally:
+        if _manage_busy:
+            _set_rendering(False)
 
 def clearScreen():
     img = Image.new(mode="RGB", size=(inky_display.width, inky_display.height),color=(255,255,255))
