@@ -14,13 +14,15 @@ Send a moment to your plink.
 
 - Upload photos from your phone
 - Crop to the display's aspect ratio before sending
-- Photo queue with configurable auto-rotate interval
+- Photo queue with configurable auto-rotate interval; replace queue items in-place
 - Palette themes: rose / ash / sun / ink (dark)
 - Portrait & landscape orientation support
 - PWA — add to home screen on iOS/Android, loads offline (cached shell via service worker)
+- Web Share Target — share photos directly from the iOS/Android Photos app
 - Haptic feedback on iOS 18+ and Android
 - Swipe-to-dismiss sheets with spring animations
 - Device controls: rotate display, clear ghosting, reboot, shutdown
+- Hotspot/AP mode — Pi broadcasts `plink-setup` Wi-Fi for initial provisioning; iOS app detects AP mode and walks through WiFi credential setup
 - Online/offline status dot — auto-detects connectivity, shows local URL hint when on Tailscale and Pi is unreachable
 
 ## Hardware

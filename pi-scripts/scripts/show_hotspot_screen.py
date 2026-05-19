@@ -72,11 +72,11 @@ def draw_ap_screen(password: str) -> Image.Image:
     text_x = qr_x + qr_w + 36
     y = qr_y
 
-    draw.text((text_x, y), "1  Point iPhone camera", font=font_label, fill="black")
+    draw.text((text_x, y), "1  Point your phone camera", font=font_label, fill="black")
     draw.text((text_x, y + 26), "   at the QR code", font=font_value, fill="#444444")
     y += 70
 
-    draw.text((text_x, y), "2  Tap "Join Network"", font=font_label, fill="black")
+    draw.text((text_x, y), '2  Tap "Join Network"', font=font_label, fill="black")
     y += 56
 
     draw.text((text_x, y), "3  Open Plink app —", font=font_label, fill="black")

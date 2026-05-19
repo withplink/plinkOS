@@ -128,8 +128,8 @@ def api_status():
     try:
         out = subprocess.check_output(['iw','dev','wlan0','link'], stderr=subprocess.DEVNULL).decode()
         for line in out.split('\n'):
-            if 'signal:' in line:
-                wifi = line.strip().replace('signal:','').strip()
+            if 'SSID:' in line:
+                wifi = line.strip().replace('SSID:', '').strip()
                 break
     except Exception:
         pass
@@ -166,8 +166,10 @@ def api_status():
     _, horiz, _ = loadSettings()
     orientation = 'landscape' if horiz == 'checked' else 'portrait'
 
+    ap_mode = os.path.exists('/tmp/plink_ap_mode')
+
     return app.response_class(
-        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering}),
+        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering, 'ap_mode': ap_mode}),
         mimetype='application/json'
     )
 
@@ -529,6 +531,89 @@ def api_queue_interval():
         q["interval"] = max(0, minutes)
         save_queue(q)
         _schedule_rotate()
+        return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
+    except Exception as e:
+        return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
+
+
+@app.route('/api/wifi/networks', methods=['GET'])
+def api_wifi_networks():
+    known = []
+    try:
+        out = subprocess.check_output(
+            ['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'],
+            stderr=subprocess.DEVNULL
+        ).decode()
+        for line in out.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 2 and '802-11-wireless' in parts[1]:
+                name = parts[0].strip()
+                if name and name != 'plink-ap':
+                    known.append(name)
+    except Exception:
+        pass
+
+    visible = []
+    try:
+        out = subprocess.check_output(
+            ['sudo', 'iwlist', 'wlan0', 'scan'],
+            stderr=subprocess.DEVNULL
+        ).decode()
+        import re
+        visible = list(dict.fromkeys(re.findall(r'ESSID:"([^"]+)"', out)))
+    except Exception:
+        pass
+
+    return app.response_class(
+        json.dumps({'known': known, 'visible': visible}),
+        mimetype='application/json'
+    )
+
+
+@app.route('/api/wifi', methods=['POST'])
+def api_wifi_connect():
+    data = request.get_json(force=True, silent=True) or {}
+    ssid = data.get('ssid', '').strip()
+    password = data.get('password', '').strip()
+
+    if not ssid:
+        return app.response_class(json.dumps({'error': 'ssid required'}), status=400, mimetype='application/json')
+
+    try:
+        # Remove existing profile for this SSID if present (ignore errors)
+        subprocess.call(
+            ['nmcli', 'connection', 'delete', 'id', ssid],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+        if password:
+            add_cmd = [
+                'nmcli', 'connection', 'add',
+                'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
+                'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
+                'connection.autoconnect', 'yes',
+            ]
+        else:
+            add_cmd = [
+                'nmcli', 'connection', 'add',
+                'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
+                'wifi-sec.key-mgmt', 'none',
+                'connection.autoconnect', 'yes',
+            ]
+
+        subprocess.check_call(add_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def _switch():
+            time.sleep(2)
+            subprocess.Popen(
+                ['/home/pi/PiInk/pi-scripts/scripts/toggle_hotspot.sh'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+
+        threading.Thread(target=_switch, daemon=True).start()
+
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')

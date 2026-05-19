@@ -1,0 +1,12 @@
+[Unit]
+Description=Plink boot WiFi check — starts AP mode if no networks configured
+After=network.target
+Before=piink.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/pi/PiInk/scripts/check_wifi_boot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,16 +1,16 @@
 #!/bin/bash
 # Toggles Pi between WiFi client mode and plink-setup AP mode.
+# Uses NetworkManager (nmcli) — NM manages hostapd + DHCP internally.
 # State tracked via /tmp/plink_ap_mode flag file.
-
-set -e
 
 FLAG="/tmp/plink_ap_mode"
 SETTINGS="/home/pi/PiInk/config/settings.json"
+QUEUE="/home/pi/PiInk/config/queue.json"
 SHOW_SCREEN="/home/pi/PiInk/scripts/show_hotspot_screen.py"
+HOTSPOT_CON="plink-ap"
 
-# Read AP password from settings.json; fall back to a default
 AP_PASS=$(python3 -c "
-import json, sys
+import json
 try:
     d = json.load(open('$SETTINGS'))
     print(d.get('ap_password', 'plink123'))
@@ -21,45 +21,41 @@ except Exception:
 if [ -f "$FLAG" ]; then
     echo "AP mode active — switching back to WiFi client"
 
-    systemctl stop hostapd dnsmasq || true
-    ip addr flush dev wlan0 || true
-    systemctl start wpa_supplicant || true
-    systemctl start dhcpcd || true
+    nmcli con down "$HOTSPOT_CON" 2>/dev/null || true
+    nmcli con delete "$HOTSPOT_CON" 2>/dev/null || true
+
+    # Reconnect to saved WiFi
+    nmcli device connect wlan0 || true
 
     rm -f "$FLAG"
 
     python3 "$SHOW_SCREEN" client
-    systemctl restart avahi-daemon
+
+    # Once WiFi reconnects, announce via mDNS and restore current image on display
+    (
+        for i in $(seq 1 30); do
+            sleep 5
+            if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+                systemctl restart avahi-daemon
+                CURRENT=$(python3 -c "
+import json
+try:
+    q = json.load(open('$QUEUE'))
+    print(q.get('current', 0))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+                curl -s -X POST http://localhost/api/queue/show \
+                    -H "Content-Type: application/json" \
+                    -d "{\"index\": $CURRENT}" >/dev/null 2>&1
+                break
+            fi
+        done
+    ) &
 else
     echo "WiFi client mode — switching to AP mode"
 
-    systemctl stop wpa_supplicant dhcpcd || true
-
-    ip link set wlan0 up
-    ip addr add 192.168.4.1/24 dev wlan0 || true
-
-    # Write hostapd config with current password
-    cat > /etc/hostapd/plink.conf <<EOF
-interface=wlan0
-driver=nl80211
-ssid=plink-setup
-hw_mode=g
-channel=6
-wmm_enabled=0
-macaddr_acl=0
-auth_algs=1
-ignore_broadcast_ssid=0
-wpa=2
-wpa_passphrase=$AP_PASS
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=TKIP
-rsn_pairwise=CCMP
-EOF
-
-    HOSTAPD_CONF=/etc/hostapd/plink.conf hostapd -B /etc/hostapd/plink.conf
-
-    # Restart dnsmasq with DHCP range
-    systemctl restart dnsmasq
+    nmcli device wifi hotspot ifname wlan0 ssid plink-setup password "$AP_PASS" con-name "$HOTSPOT_CON"
 
     touch "$FLAG"
 

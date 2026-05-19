@@ -53,10 +53,32 @@ sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink
 
 ## Queue System
 
-- `/home/pi/PiInk/config/queue.json`: `{items:[{filename, label, added_at}], current:0, interval:0}`
+- `/home/pi/PiInk/config/queue.json`: `{items:[{filename, label, added_at, orig_filename?}], current:0, interval:0}`
+- `orig_filename` is the pre-crop original; stored when uploaded via `/api/queue/replace`
 - Filenames prefixed with timestamp (`YYYYMMDD_HHMMSS_`) to avoid collisions
 - `threading.Timer` + `threading.Lock` for auto-rotate
 - When queue becomes empty, keep the last file on disk (still showing on e-ink)
+
+## Key API Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/status` | `{wifi, uptime, image_url, orientation, busy, ap_mode}` |
+| `POST` | `/api/upload` | Multipart file upload; shows immediately or adds to queue |
+| `POST` | `/api/action` | `{action}`: `rotate`, `clear_ghost`, `reboot`, `shutdown` |
+| `POST` | `/api/settings` | Save orientation/aspect-ratio settings |
+| `GET` | `/api/queue` | Full queue state |
+| `POST` | `/api/queue/add` | Add item to queue |
+| `POST` | `/api/queue/remove` | Remove item by index |
+| `POST` | `/api/queue/reorder` | Reorder items |
+| `POST` | `/api/queue/replace` | Replace item at index (multipart: `index`, `file`, optional `original`) |
+| `POST` | `/api/queue/next` | Advance to next item |
+| `POST` | `/api/queue/show` | Jump to item by index |
+| `POST` | `/api/queue/interval` | Set auto-rotate interval in minutes |
+| `GET` | `/api/hotspot/status` | `{active, ssid, password, ip}` — AP mode state |
+| `GET` | `/api/wifi/networks` | `{known, visible}` — known SSIDs from `wpa_supplicant.conf` + Pi scan results |
+| `POST` | `/api/wifi` | `{ssid, password?}` — write creds, trigger hotspot→client switch after 2s |
+| `GET/POST` | `/share-target` | Web Share Target receiver; accepts shared photos from OS share sheet |
 
 ## GitHub
 
