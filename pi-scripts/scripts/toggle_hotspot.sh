@@ -31,11 +31,14 @@ if [ -f "$FLAG" ]; then
 
     python3 "$SHOW_SCREEN" client
 
-    # Once WiFi reconnects, announce via mDNS and restore current image on display
+    # Once WiFi reconnects, announce via mDNS and restore current image on display.
+    # If internet never comes up (wrong network saved), revert to AP mode.
     (
+        CONNECTED=0
         for i in $(seq 1 30); do
             sleep 5
             if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+                CONNECTED=1
                 systemctl restart avahi-daemon
                 CURRENT=$(python3 -c "
 import json
@@ -51,6 +54,10 @@ except Exception:
                 break
             fi
         done
+        if [ "$CONNECTED" -eq 0 ]; then
+            echo "No internet after 150s — reverting to AP mode."
+            bash "$0"
+        fi
     ) &
 else
     echo "WiFi client mode — switching to AP mode"

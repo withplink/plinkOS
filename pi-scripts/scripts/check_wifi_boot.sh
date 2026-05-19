@@ -23,10 +23,25 @@ for i in $(seq 1 6); do
     sleep 5
     IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
     if [ -n "$IP" ]; then
-        echo "WiFi connected: $IP"
-        exit 0
+        echo "WiFi connected: $IP — checking internet..."
+        break
     fi
 done
 
-echo "wlan0 got no IP after 30s — starting AP mode."
+if [ -z "$IP" ]; then
+    echo "wlan0 got no IP after 30s — starting AP mode."
+    bash "$TOGGLE"
+    exit 0
+fi
+
+# Got an IP — verify internet reachability (wrong WiFi has DHCP but no route to us)
+for i in $(seq 1 6); do
+    if ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+        echo "Internet reachable."
+        exit 0
+    fi
+    sleep 5
+done
+
+echo "Got IP but no internet after 30s — starting AP mode."
 bash "$TOGGLE"
