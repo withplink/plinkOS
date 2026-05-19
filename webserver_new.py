@@ -429,6 +429,8 @@ def api_queue_reorder():
     q['items'] = [items[i] for i in new_order]
     q['current'] = new_order.index(current)
     save_queue(q)
+    if _next_rotate_at is not None:
+        q['next_rotate_at'] = _next_rotate_at
     return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
 
 
