@@ -5,8 +5,14 @@ from flask import send_from_directory
 from datetime import datetime
 from PIL import Image
 import json
-from inky.auto import auto
+from inky.inky_ac073tc1a import Inky
 import RPi.GPIO as GPIO
+
+inky_display = Inky(
+    resolution=(800, 480),
+    colour="multi"
+)
+
 from PIL import ImageDraw,Image
 BUTTONS = [6, 16, 24]
 ORIENTATION = 0
@@ -25,7 +31,6 @@ pathExist = os.path.exists(os.path.join(PATH,"img"))
 if(pathExist == False):
    os.makedirs(os.path.join(PATH,"img"))
 
-inky_display = auto(ask_user=True, verbose=True)
 inky_display.set_border(inky_display.BLACK)
 
 app = Flask(__name__)
