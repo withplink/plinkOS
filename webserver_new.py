@@ -616,17 +616,16 @@ def adjustAspectRatio(img,adjustARBool):
     h = inky_display.height
     ratioWidth = w / img.width
     ratioHeight = h / img.height
-    # object-fit: cover — scale up to fill, then center-crop
-    if ratioWidth > ratioHeight:
-        resizedWidth = w
-        resizedHeight = round(ratioWidth * img.height)
-    else:
-        resizedWidth = round(ratioHeight * img.width)
-        resizedHeight = h
+    # object-fit: contain — scale to fit, letterbox with white
+    scale = min(ratioWidth, ratioHeight)
+    resizedWidth = round(scale * img.width)
+    resizedHeight = round(scale * img.height)
     imgResized = img.resize((resizedWidth, resizedHeight), Image.LANCZOS)
-    left = round((resizedWidth - w) / 2)
-    top = round((resizedHeight - h) / 2)
-    return imgResized.crop((left, top, left + w, top + h))
+    canvas = Image.new("RGB", (w, h), (255, 255, 255))
+    left = round((w - resizedWidth) / 2)
+    top = round((h - resizedHeight) / 2)
+    canvas.paste(imgResized, (left, top))
+    return canvas
 
 def deleteImage():
     img_directory = os.path.join(PATH, "img")
