@@ -41,26 +41,34 @@ Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/). **Important: u
 
 In the imager's advanced settings (gear icon):
 - Hostname: `pi`
-- Set a username and password (remember these — you'll need them for SSH)
+- Set a username and password
 - WiFi: your home network
 - Enable SSH
 
-### 2. Boot the Pi
+### 2. Configure credentials
 
-Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for first boot.
-
-### 3. Run first-boot setup
-
-On your Mac (with `sshpass` installed — `brew install sshpass`), clone this repo and run:
+Clone this repo and create a `.env` file with your Pi's SSH credentials:
 
 ```bash
 git clone https://github.com/PixeledCode/pi-ink.git
 cd pi-ink
+cp .env.example .env
+# Edit .env with your username and password
+```
+
+### 3. Boot the Pi
+
+Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for first boot.
+
+### 4. Run first-boot setup
+
+Make sure `sshpass` is installed (`brew install sshpass`), then:
+
+```bash
 bash pi-scripts/first-boot-setup.sh
 ```
 
 The script will:
-
 - Wait for the Pi to come online
 - Set static IP `192.168.1.50`
 - Enable SPI + add `dtoverlay=spi0-0cs` (required for the display)
@@ -70,9 +78,10 @@ The script will:
 - Install systemd services (`piink`, `plink-buttons`, `plink-boot-check`)
 - Patch the Inky library for GPIO/SPI compatibility
 - Install Avahi mDNS service
+- Reboot the Pi (required for boot config changes)
 - Start the frame server
 
-### 4. Done
+### 5. Done
 
 The frame is live at `http://pi.local` or `http://192.168.1.50`. Open it on your phone and upload a photo.
 
@@ -104,7 +113,6 @@ The `spi0-0cs` overlay disables the SPI driver's chip-select claim on GPIO8, whi
 ### Inky library patch
 
 The `pi-scripts/patch_inky.py` script patches the installed Inky library (v2.x) to:
-
 1. Skip the GPIO pin availability check (fails on Bookworm)
 2. Not request the CS pin via gpiod (spidev owns it)
 3. Not manually toggle CS in `_spi_write` (spidev handles it)

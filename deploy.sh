@@ -9,7 +9,10 @@ if [ -f "$(dirname "$0")/.env" ]; then
 fi
 
 PI_USER="${PI_USER:-pi}"
-PI_PASS="${PI_PASS:-5409}"
+if [ -z "$PI_PASS" ]; then
+  echo "Error: PI_PASS not set. Copy .env.example to .env and fill in your Pi password."
+  exit 1
+fi
 HOST="$PI_USER@pi.local"
 
 sshpass -p "$PI_PASS" scp webserver_new.py "$HOST":/home/pi/PiInk/src/webserver.py
