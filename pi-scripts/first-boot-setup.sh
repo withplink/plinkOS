@@ -24,7 +24,7 @@ SCP="sshpass -p $PI_PASS scp -o StrictHostKeyChecking=no"
 
 echo "=== Waiting for Pi to come online ==="
 
-until sshpass -p "" ssh \
+until sshpass -p "$PI_PASS" ssh \
   -o StrictHostKeyChecking=no \
   -o ConnectTimeout=5 \
   "$PI" "echo ok" 2>/dev/null; do
@@ -236,7 +236,7 @@ sudo reboot
 echo "Pi is rebooting (boot config changes require reboot)..."
 echo "Waiting for Pi to come back online..."
 
-until sshpass -p "" ssh \
+until sshpass -p "$PI_PASS" ssh \
   -o StrictHostKeyChecking=no \
   -o ConnectTimeout=5 \
   "$PI" "echo ok" 2>/dev/null; do
