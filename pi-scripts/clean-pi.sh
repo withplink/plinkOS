@@ -44,7 +44,11 @@ SPINNER_CHARS=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 
 section() {
   echo ""
-  printf "${CYAN}${BOLD}[%s] %s${NC}\n" "$1" "$2"
+  if [ -n "$1" ]; then
+    printf "${CYAN}${BOLD}[%s] %s${NC}\n" "$1" "$2"
+  else
+    printf "${CYAN}${BOLD}%s${NC}\n" "$2"
+  fi
   echo ""
 }
 
@@ -80,7 +84,7 @@ divider() {
 }
 
 echo ""
-section "1/1" "Cleaning Pi"
+section "" "Cleaning Pi"
 
 step "Stop services" \
   $SSH "echo '$PI_PASS' | sudo -S systemctl stop piink plink-buttons plink-boot-check 2>/dev/null || true"
