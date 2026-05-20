@@ -57,7 +57,7 @@ nmcli connection modify "$CON" \
   ipv4.method manual \
   ipv6.method link-local
 
-nmcli connection up "$CON"
+echo "Static IP profile saved — will apply after reboot"
 EOF
 REMOTE
 
