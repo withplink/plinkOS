@@ -55,7 +55,7 @@ def patch_inky_file(path):
     content = content.replace(old_request, new_request)
 
     # 3. Don't manually control CS pin in _spi_write (spidev handles it)
-    # Remove the two cs_pin set_value lines — works for any _spi_write variant
+    # Remove ALL cs_pin set_value calls — works for any _spi_write variant
     content = re.sub(
         r'(\s+)self\._gpio\.set_value\(self\.cs_pin, Value\.INACTIVE\)\n(\s+)(self\._gpio\.set_value\(self\.dc_pin)',
         r'\2# CS handled by SPI driver\n\2\3',
