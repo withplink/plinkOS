@@ -29,47 +29,61 @@ Send a moment to your plink.
 
 - Raspberry Pi Zero 2W
 - Inky Impression 7.3" e-ink display (Spectra 6 / E673 controller)
+- microSD card (8GB+)
 
-## Setup
+## New Frame Setup
 
-### Flash
+From unboxing to a working frame:
 
-Use Raspberry Pi Imager with **Pi OS Lite (Bookworm 64-bit)**. In the advanced settings:
+### 1. Flash the microSD card
 
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/). **Important: use Raspberry Pi OS Lite (Bookworm) 32-bit** — the 64-bit version has GPIO compatibility issues with the Inky library.
+
+In the imager's advanced settings (gear icon):
 - Hostname: `pi`
-- User: `pi`, password: `5409`
+- Username: `pi`, Password: `5409`
 - WiFi: your home network
 - Enable SSH
 
-### First-boot setup (run from Mac)
+### 2. Boot the Pi
 
-Make sure `sshpass` is installed (`brew install sshpass`), then from the repo root:
+Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for first boot.
+
+### 3. Run first-boot setup
+
+On your Mac (with `sshpass` installed — `brew install sshpass`), clone this repo and run:
 
 ```bash
+git clone https://github.com/PixeledCode/pi-ink.git
+cd pi-ink
 bash pi-scripts/first-boot-setup.sh
 ```
 
-This script waits for the Pi to come online, then:
-- Sets static IP `192.168.1.50`
-- Enables link-local IPv6 (required for iOS Bonjour discovery)
-- Disables WiFi power save
-- Installs Python + system deps
-- Deploys `webserver_new.py` and `main.html`
-- Installs all systemd services (`piink`, `plink-buttons`, `plink-boot-check`)
-- Installs Avahi mDNS service
-- Starts the frame server
+The script will:
+- Wait for the Pi to come online
+- Set static IP `192.168.1.50`
+- Enable SPI + add `dtoverlay=spi0-0cs` (required for the display)
+- Disable WiFi power save
+- Install all Python and system dependencies
+- Deploy the webserver and frontend
+- Install systemd services (`piink`, `plink-buttons`, `plink-boot-check`)
+- Patch the Inky library for GPIO/SPI compatibility
+- Install Avahi mDNS service
+- Start the frame server
 
-Frame is live at `http://pi.local` when done.
+### 4. Done
+
+The frame is live at `http://pi.local` or `http://192.168.1.50`. Open it on your phone and upload a photo.
 
 ## Deploying changes
 
-From the repo root on your Mac:
+After the initial setup, push code changes with:
 
 ```bash
 ./deploy.sh
 ```
 
-Copies both files to the Pi and restarts the service.
+Copies `webserver_new.py` and `main.html` to the Pi and restarts the service.
 
 ## Display Driver Notes
 
@@ -93,7 +107,7 @@ The `pi-scripts/patch_inky.py` script patches the installed Inky library (v2.x) 
 2. Not request the CS pin via gpiod (spidev owns it)
 3. Not manually toggle CS in `_spi_write` (spidev handles it)
 
-This runs automatically during `install.sh`.
+This runs automatically during `first-boot-setup.sh`.
 
 ## Design
 

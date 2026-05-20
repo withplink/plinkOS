@@ -88,6 +88,12 @@ pip3 install --break-system-packages \
 "
 
 echo ""
+echo "=== Patch Inky library for GPIO/SPI compatibility ==="
+
+$SCP pi-scripts/patch_inky.py "$PI:/tmp/patch_inky.py"
+$SSH "sudo python3 /tmp/patch_inky.py"
+
+echo ""
 echo "=== Install system deps ==="
 
 $SSH "
@@ -103,6 +109,15 @@ $SCP webserver_new.py \
 
 $SCP main.html \
   "$PI:$PI_HOME/src/templates/main.html"
+
+echo ""
+echo "=== Enable SPI + disable CS conflict in boot config ==="
+
+$SSH "
+sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt
+grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\"
+echo 'Boot config updated — reboot required for changes to take effect'
+"
 
 echo ""
 echo "=== Install scripts ==="
@@ -202,13 +217,29 @@ echo ""
 echo "=== Start piink ==="
 
 $SSH "
-sudo systemctl start piink
+sudo reboot
 "
+
+echo "Pi is rebooting (boot config changes require reboot)..."
+echo "Waiting for Pi to come back online..."
+
+until sshpass -p "$PASS" ssh \
+  -o StrictHostKeyChecking=no \
+  -o ConnectTimeout=5 \
+  "$PI" "echo ok" 2>/dev/null; do
+
+  echo "not reachable yet, retrying in 5s..."
+  sleep 5
+done
+
+echo "Pi is back online."
 
 sleep 3
 
 $SSH "
-sudo systemctl status piink --no-pager | head -20
+sudo systemctl start piink
+sleep 3
+sudo systemctl status piink --no-pager | head -10
 "
 
 echo ""
