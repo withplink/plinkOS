@@ -19,14 +19,12 @@ fi
 PI="$PI_USER@$PI_HOST"
 PI_HOME="/home/pi/PiInk"
 
-SSH="sshpass -p $PI_PASS ssh -o StrictHostKeyChecking=no $PI"
-SCP="sshpass -p $PI_PASS scp -o StrictHostKeyChecking=no"
+SSH="sshpass -p $PI_PASS ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $PI"
+SCP="sshpass -p $PI_PASS scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR"
 
 echo "=== Waiting for Pi to come online ==="
 
-until sshpass -p "$PI_PASS" ssh \
-  -o StrictHostKeyChecking=no \
-  -o ConnectTimeout=5 \
+until sshpass -p "$PI_PASS" ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" 2>/dev/null; do
 
   echo "not reachable yet, retrying in 5s..."
@@ -236,9 +234,7 @@ sudo reboot
 echo "Pi is rebooting (boot config changes require reboot)..."
 echo "Waiting for Pi to come back online..."
 
-until sshpass -p "$PI_PASS" ssh \
-  -o StrictHostKeyChecking=no \
-  -o ConnectTimeout=5 \
+until sshpass -p "$PI_PASS" ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" 2>/dev/null; do
 
   echo "not reachable yet, retrying in 5s..."
