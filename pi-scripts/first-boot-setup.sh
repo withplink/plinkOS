@@ -178,10 +178,11 @@ printf "  ${BOLD}Rebooting Pi${NC}\n\n"
 $SSH "sudo reboot" >>/tmp/plink-setup.log 2>&1 || true
 printf "  ${YELLOW}⋯${NC} Rebooting..."
 
+i=0
 until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" >>/tmp/plink-setup.log 2>/dev/null; do
-  printf "\r  ${YELLOW}⋯${NC} Waiting for Pi to come back online              "
-  sleep 5
+  printf "\r  ${YELLOW}%s${NC} Waiting for Pi to come back online" "${SPINNER_CHARS[$((i++ % ${#SPINNER_CHARS[@]}))]}"
+  sleep 0.1
 done
 printf "\r  ${GREEN}✓${NC} Pi is back online                                \n"
 
