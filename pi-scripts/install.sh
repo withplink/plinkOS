@@ -81,6 +81,12 @@ sudo systemctl daemon-reload
 sudo systemctl enable piink plink-buttons plink-boot-check
 
 echo ""
+echo "=== Enable persistent systemd journal ==="
+sudo mkdir -p /var/log/journal
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo systemctl restart systemd-journald
+
+echo ""
 echo "=== Enable SPI + disable CS conflict in boot config ==="
 sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt
 grep -q "dtoverlay=spi0-0cs" /boot/firmware/config.txt || sudo sh -c "echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt"
