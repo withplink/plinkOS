@@ -14,10 +14,15 @@ def patch_inky_file(path):
 
     original = content
 
-    # 1. Skip GPIO pin availability check
-    content = content.replace(
-        'if gpiodevice.check_pins_available(gpiochip, {',
-        '# Skip GPIO pin check — SPI driver handles CS\n                if True:'
+    # 1. Skip GPIO pin availability check — replace entire if condition
+    # Original: if gpiodevice.check_pins_available(gpiochip, { ... }):
+    # Becomes:  if True:  (body still runs, but pin check is skipped)
+    import re
+    content = re.sub(
+        r'if gpiodevice\.check_pins_available\(gpiochip, \{.*?\}\):',
+        'if True:  # Skip GPIO pin check — SPI driver handles CS',
+        content,
+        flags=re.DOTALL
     )
 
     # 2. Don't request CS pin via gpiod (spidev owns it)
