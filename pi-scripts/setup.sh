@@ -166,7 +166,7 @@ echo ""
 
 cd "$TMP_DIR"
 export PI_HOST
-bash pi-scripts/first-boot-setup.sh
+bash pi-scripts/first-boot-setup.sh "$@"
 
 # Cleanup
 rm -rf "$TMP_DIR"

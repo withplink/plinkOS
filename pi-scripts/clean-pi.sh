@@ -1,8 +1,15 @@
 #!/bin/bash
 # Clean Pi to fresh state — removes all Plink files, services, packages, and config changes
-# Usage: bash pi-scripts/clean-pi.sh
+# Usage: bash pi-scripts/clean-pi.sh [--verbose]
 
 set -e
+
+VERBOSE=0
+for arg in "$@"; do
+  if [ "$arg" = "--verbose" ] || [ "$arg" = "-v" ]; then
+    VERBOSE=1
+  fi
+done
 
 # Load .env if present
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,16 +54,21 @@ spinner_start() {
 step() {
   local label="$1"
   shift
-  spinner_start "$label" &
-  SPINNER_PID=$!
-  if "$@" >/dev/null 2>&1; then
-    kill "$SPINNER_PID" 2>/dev/null
-    wait "$SPINNER_PID" 2>/dev/null
-    printf "\r  ${GREEN}✓${NC} %s\n" "$label"
+  if [ "$VERBOSE" -eq 1 ]; then
+    printf "  ${BOLD}→${NC} %s\n" "$label"
+    "$@" 2>&1
   else
-    kill "$SPINNER_PID" 2>/dev/null
-    wait "$SPINNER_PID" 2>/dev/null
-    printf "\r  ${RED}✗${NC} %s\n" "$label"
+    spinner_start "$label" &
+    SPINNER_PID=$!
+    if "$@" >/dev/null 2>&1; then
+      kill "$SPINNER_PID" 2>/dev/null
+      wait "$SPINNER_PID" 2>/dev/null
+      printf "\r  ${GREEN}✓${NC} %s\n" "$label"
+    else
+      kill "$SPINNER_PID" 2>/dev/null
+      wait "$SPINNER_PID" 2>/dev/null
+      printf "\r  ${RED}✗${NC} %s (run with --verbose to see full logs)\n" "$label"
+    fi
   fi
 }
 

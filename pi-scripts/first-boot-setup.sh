@@ -2,6 +2,13 @@
 
 set -e
 
+VERBOSE=0
+for arg in "$@"; do
+  if [ "$arg" = "--verbose" ] || [ "$arg" = "-v" ]; then
+    VERBOSE=1
+  fi
+done
+
 # Load .env if present (repo root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/../.env" ]; then
@@ -46,16 +53,21 @@ spinner_start() {
 step() {
   local label="$1"
   shift
-  spinner_start "$label" &
-  SPINNER_PID=$!
-  if "$@" >>/tmp/plink-setup.log 2>&1; then
-    kill "$SPINNER_PID" 2>/dev/null
-    wait "$SPINNER_PID" 2>/dev/null
-    printf "\r  ${GREEN}✓${NC} %s\n" "$label"
+  if [ "$VERBOSE" -eq 1 ]; then
+    printf "  ${BOLD}→${NC} %s\n" "$label"
+    "$@" 2>&1
   else
-    kill "$SPINNER_PID" 2>/dev/null
-    wait "$SPINNER_PID" 2>/dev/null
-    printf "\r  ${RED}✗${NC} %s (see /tmp/plink-setup.log on Pi)\n" "$label"
+    spinner_start "$label" &
+    SPINNER_PID=$!
+    if "$@" >>/tmp/plink-setup.log 2>&1; then
+      kill "$SPINNER_PID" 2>/dev/null
+      wait "$SPINNER_PID" 2>/dev/null
+      printf "\r  ${GREEN}✓${NC} %s\n" "$label"
+    else
+      kill "$SPINNER_PID" 2>/dev/null
+      wait "$SPINNER_PID" 2>/dev/null
+      printf "\r  ${RED}✗${NC} %s (run with --verbose to see full logs)\n" "$label"
+    fi
   fi
 }
 
