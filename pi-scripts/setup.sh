@@ -13,13 +13,7 @@ YELLOW='\033[1;33m'
 CORAL='\033[38;2;255;127;80m'
 NC='\033[0m'
 
-echo -e "${CORAL}"
-echo "  ___  _        _  _        "
-echo " | _ \| |_  ___| || |  ___  "
-echo " |  _/| ' \(_-< __ | / -_) "
-echo " |_|  |_||_/__/_||_| \___| "
-echo -e "${NC}"
-echo "e-ink photo frame setup"
+echo -e "${CORAL}Plink${NC} — e-ink photo frame setup"
 echo ""
 
 # Check sshpass
