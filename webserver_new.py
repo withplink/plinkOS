@@ -5,7 +5,7 @@ from flask import send_from_directory
 from datetime import datetime
 from PIL import Image
 import json
-from inky.inky_ac073tc1a import Inky
+from inky.inky_e673 import Inky
 import RPi.GPIO as GPIO
 
 inky_display = Inky(
