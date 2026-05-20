@@ -11,6 +11,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
 WHITE='\033[1;37m'
+DIM_WHITE='\033[2;37m'
 NC='\033[0m'
 
 # Read from terminal
@@ -31,12 +32,16 @@ tty_read() {
 # Header — stylized e-ink display frame
 print_header() {
   echo ""
-  printf "${DIM}╭────────────────────────╮${NC}\n"
-  printf "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}\n"
-  printf "${DIM}│${NC}  ${CYAN}░${NC}      ${WHITE}Plink${NC}       ${CYAN}░${NC}  ${DIM}│${NC}\n"
-  printf "${DIM}│${NC}  ${CYAN}░${NC}   e-ink frame    ${CYAN}░${NC}  ${DIM}│${NC}\n"
-  printf "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}\n"
-  printf "${DIM}╰────────────────────────╯${NC}\n"
+  printf "${DIM}╭────────────────────────────────╮${NC}\n"
+  printf "${DIM}│${NC}  ${CYAN}░ ░░ ░ ░░ ░ ░░ ░ ░░ ░ ░░${NC}  ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}                                ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}        ${DIM}┌──────────────┐${NC}        ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}        ${DIM}│${NC}    ${WHITE}Plink${NC}     ${DIM}│${NC}        ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}        ${DIM}│${NC} ${DIM_WHITE}e-ink frame${NC}  ${DIM}│${NC}        ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}        ${DIM}└──────────────┘${NC}        ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}                                ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}  ${CYAN}░ ░░ ░ ░░ ░ ░░ ░ ░░ ░ ░░${NC}  ${DIM}│${NC}\n"
+  printf "${DIM}╰────────────────────────────────╯${NC}\n"
   echo ""
 }
 
