@@ -89,7 +89,7 @@ grep -q "dtoverlay=spi0-0cs" /boot/firmware/config.txt && echo "SPI CS disabled 
 
 echo ""
 echo "=== Patch Inky library for GPIO/SPI compatibility ==="
-python3 "$SCRIPT_DIR/patch_inky.py"
+sudo python3 "$SCRIPT_DIR/patch_inky.py"
 
 echo ""
 echo "=== Install Avahi service ==="
