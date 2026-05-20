@@ -45,20 +45,20 @@ In the imager's advanced settings (gear icon):
 - WiFi: your home network
 - Enable SSH
 
-### 2. Configure credentials
+### 2. Boot the Pi
 
-Clone this repo and create a `.env` file with your Pi's SSH credentials:
+Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for first boot.
+
+### 3. Configure credentials
+
+Clone this repo and create a `.env` file with the **same password you set during flashing**:
 
 ```bash
 git clone https://github.com/PixeledCode/pi-ink.git
 cd pi-ink
 cp .env.example .env
-# Edit .env with your username and password
+# Edit .env — PI_PASS must match the password from step 1
 ```
-
-### 3. Boot the Pi
-
-Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for first boot.
 
 ### 4. Run first-boot setup
 
