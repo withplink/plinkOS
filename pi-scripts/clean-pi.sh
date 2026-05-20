@@ -32,13 +32,30 @@ RED='\033[0;31m'
 NC='\033[0m'
 BOLD='\033[1m'
 
+SPINNER_PID=""
+SPINNER_CHARS=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+
+spinner_start() {
+  local i=0
+  while true; do
+    printf "\r  ${YELLOW}%s${NC} %s" "${SPINNER_CHARS[$i]}" "$1"
+    i=$(( (i + 1) % ${#SPINNER_CHARS[@]} ))
+    sleep 0.1
+  done
+}
+
 step() {
   local label="$1"
   shift
-  printf "  ${YELLOW}⋯${NC} %s" "$label"
+  spinner_start "$label" &
+  SPINNER_PID=$!
   if "$@" >/dev/null 2>&1; then
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null
     printf "\r  ${GREEN}✓${NC} %s\n" "$label"
   else
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null
     printf "\r  ${RED}✗${NC} %s\n" "$label"
   fi
 }
