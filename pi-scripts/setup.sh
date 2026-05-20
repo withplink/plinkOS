@@ -151,22 +151,27 @@ if ! try_connect "$PI_HOST"; then
 fi
 
 # Clone repo
-echo ""
-echo "Cloning Plink repo..."
 TMP_DIR=$(mktemp -d)
-git clone https://github.com/PixeledCode/pi-ink.git "$TMP_DIR" >/dev/null 2>&1 || {
-  echo "Failed to clone repo. Check your internet connection."
+SPINNER_CHARS=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+printf "  ${YELLOW}⋯${NC} Cloning Plink repo"
+git clone https://github.com/PixeledCode/pi-ink.git "$TMP_DIR" >/dev/null 2>&1 &
+CLONE_PID=$!
+i=0
+while kill -0 $CLONE_PID 2>/dev/null; do
+  printf "\r  ${YELLOW}%s${NC} Cloning Plink repo" "${SPINNER_CHARS[$((i++ % ${#SPINNER_CHARS[@]}))]}"
+  sleep 0.1
+done
+wait $CLONE_PID || {
+  printf "\r  ${RED}✗${NC} Cloning Plink repo (check your internet connection)\n"
   exit 1
 }
+printf "\r  ${GREEN}✓${NC} Cloning Plink repo\n"
 
 # Create .env
 printf 'PI_USER=%s\nPI_HOST=%s\nPI_PASS=%s\n' "$PI_USER" "$PI_HOST" "$PI_PASS" > "$TMP_DIR/.env"
 
 # Run first-boot setup
 echo ""
-echo "Setting up your Pi..."
-echo ""
-
 cd "$TMP_DIR"
 export PI_HOST
 bash pi-scripts/first-boot-setup.sh "$@"

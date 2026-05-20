@@ -54,7 +54,7 @@ step() {
   shift
   if [ "$VERBOSE" -eq 1 ]; then
     printf "  ${DIM}→${NC} %s\n" "$label"
-    "$@" 2>&1
+    eval "$@" 2>&1
   else
     local i=0
     while true; do
@@ -64,7 +64,7 @@ step() {
       if kill -0 $! 2>/dev/null; then true; else break; fi
     done &
     local pid=$!
-    if "$@" >>"$LOG_FILE" 2>&1; then
+    if eval "$@" >>"$LOG_FILE" 2>&1; then
       kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       printf "\r  ${GREEN}✓${NC} %s\n" "$label"
@@ -94,10 +94,11 @@ echo ""
 section "1/5" "Connecting to Pi"
 
 printf "  ${YELLOW}⋯${NC} Looking for your Pi"
+i=0
 until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" >>"$LOG_FILE" 2>/dev/null; do
-  printf "."
-  sleep 5
+  printf "\r  ${YELLOW}%s${NC} Looking for your Pi" "${SPINNER_CHARS[$((i++ % ${#SPINNER_CHARS[@]}))]}"
+  sleep 0.1
 done
 printf "\r  ${GREEN}✓${NC} Pi found and reachable\n"
 
@@ -194,12 +195,12 @@ echo ""
 
 $SSH "sudo reboot" >>"$LOG_FILE" 2>&1 || true
 
-printf "  ${YELLOW}⋯${NC} Waiting for Pi to reconnect"
-i=0
+echo ""
+printf "  ${DIM}Waiting for Pi to reconnect${NC}"
 until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" >>"$LOG_FILE" 2>/dev/null; do
-  printf "\r  ${YELLOW}%s${NC} Waiting for Pi to reconnect" "${SPINNER_CHARS[$((i++ % ${#SPINNER_CHARS[@]}))]}"
-  sleep 0.1
+  printf "."
+  sleep 5
 done
 printf "\r  ${GREEN}✓${NC} Pi is back online\n"
 
