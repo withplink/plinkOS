@@ -13,6 +13,21 @@ YELLOW='\033[1;33m'
 CORAL='\033[38;2;255;127;80m'
 NC='\033[0m'
 
+# Read from terminal even when script is piped
+tty_read() {
+  local prompt="$1"
+  local varname="$2"
+  local hidden="$3"
+  local val=""
+  if [ "$hidden" = "1" ]; then
+    read -s -p "$prompt" val < /dev/tty
+    echo ""
+  else
+    read -p "$prompt" val < /dev/tty
+  fi
+  eval "$varname='$val'"
+}
+
 echo -e "${CORAL}"
 echo "▗▄▄▖ ▗▄▖    █       ▗▖   "
 echo "▐▛▀▜▖▝▜▌    ▀       ▐▌   "
