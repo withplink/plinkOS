@@ -77,6 +77,45 @@ sudo systemctl daemon-reload
 sudo systemctl enable piink plink-buttons plink-boot-check
 
 echo ""
+echo "=== Enable SPI in boot config ==="
+sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt
+grep -q "dtparam=spi=on" /boot/firmware/config.txt && echo "SPI enabled" || echo "WARNING: SPI not found in config"
+
+echo ""
+echo "=== Patch Inky library for GPIO/SPI compatibility ==="
+python3 << 'PYEOF'
+import os
+inky_path = "/home/pi/.local/lib/python3.13/site-packages/inky/inky_ac073tc1a.py"
+if not os.path.exists(inky_path):
+    print("Inky library not found, skipping patch")
+else:
+    with open(inky_path, "r") as f:
+        content = f.read()
+
+    # 1. Skip GPIO pin checking
+    content = content.replace(
+        'if gpiodevice.check_pins_available(gpiochip, {\n                        "Chip Select": self.cs_pin,\n                        "Data/Command": self.dc_pin,\n                        "Reset": self.reset_pin,\n                        "Busy": self.busy_pin\n                    }):',
+        '# Skip GPIO pin checking - assume pins are available\n                if True:'
+    )
+
+    # 2. Don't request CS pin via gpiod (SPI driver handles it)
+    content = content.replace(
+        'self._gpio = gpiochip.request_lines(consumer="inky", config={\n                        self.cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),\n                        self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),\n                        self.reset_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),\n                        self.busy_pin: gpiod.LineSettings(direction=Direction.INPUT, edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=10))\n                    })',
+        '# Only request DC, RESET, and BUSY pins - SPI driver handles CS\n                    self._gpio = gpiochip.request_lines(consumer="inky", config={\n                        self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),\n                        self.reset_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),\n                        self.busy_pin: gpiod.LineSettings(direction=Direction.INPUT, edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=10))\n                    })'
+    )
+
+    # 3. Don't manually control CS pin in _spi_write
+    content = content.replace(
+        'self._gpio.set_value(self.cs_pin, Value.INACTIVE)\n        self._gpio.set_value(self.dc_pin, Value.ACTIVE if dc else Value.INACTIVE)\n\n        if isinstance(values, str):\n            values = [ord(c) for c in values]\n\n        for byte_value in values:\n            self._spi_bus.xfer([byte_value])\n\n        self._gpio.set_value(self.cs_pin, Value.ACTIVE)',
+        '# CS is handled by SPI driver, only control DC pin\n        self._gpio.set_value(self.dc_pin, Value.ACTIVE if dc else Value.INACTIVE)\n\n        if isinstance(values, str):\n            values = [ord(c) for c in values]\n\n        for byte_value in values:\n            self._spi_bus.xfer([byte_value])'
+    )
+
+    with open(inky_path, "w") as f:
+        f.write(content)
+    print("Inky library patched successfully")
+PYEOF
+
+echo ""
 echo "=== Install Avahi service ==="
 sudo mkdir -p /etc/avahi/services
 sudo cp "$SCRIPT_DIR/plink.avahi.service" /etc/avahi/services/plink.service

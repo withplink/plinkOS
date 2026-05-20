@@ -18,8 +18,13 @@ BUTTONS = [6, 16, 24]
 ORIENTATION = 0
 ADJUST_AR = False
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(BUTTONS, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+try:
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(BUTTONS, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    _gpio_available = True
+except Exception as e:
+    print(f"GPIO init skipped (buttons handled by plink-buttons service): {e}")
+    _gpio_available = False
 
 PATH = os.path.dirname(os.path.dirname(__file__))
 print(PATH)
@@ -852,8 +857,12 @@ def share_target():
     return redirect('/?shared=1')
 
 
-for pin in BUTTONS:
-        GPIO.add_event_detect(pin, GPIO.FALLING, handleButton, bouncetime=250)
+if _gpio_available:
+    try:
+        for pin in BUTTONS:
+            GPIO.add_event_detect(pin, GPIO.FALLING, handleButton, bouncetime=250)
+    except Exception as e:
+        print(f"GPIO event detection skipped: {e}")
 
 if __name__ == '__main__':
     app.secret_key = str(random.randint(100000,999999))
