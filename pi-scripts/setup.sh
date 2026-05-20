@@ -13,7 +13,16 @@ YELLOW='\033[1;33m'
 CORAL='\033[38;2;255;127;80m'
 NC='\033[0m'
 
-echo -e "${CORAL}Plink${NC} — e-ink photo frame setup"
+echo -e "${CORAL}"
+echo "▗▄▄▖ ▗▄▖    █       ▗▖   "
+echo "▐▛▀▜▖▝▜▌    ▀       ▐▌   "
+echo "▐▌ ▐▌ ▐▌   ██  ▐▙██▖▐▌▟▛ "
+echo "▐██▛  ▐▌    █  ▐▛ ▐▌▐▙█  "
+echo "▐▌    ▐▌    █  ▐▌ ▐▌▐▛█▖ "
+echo "▐▌    ▐▙▄ ▗▄█▄▖▐▌ ▐▌▐▌▝▙ "
+echo "▝▘     ▀▀ ▝▀▀▀▘▝▘ ▝▘▝▘ ▀▘"
+echo -e "${NC}"
+echo "e-ink photo frame setup"
 echo ""
 
 # Check sshpass
@@ -137,7 +146,7 @@ printf 'PI_USER=%s\nPI_HOST=%s\nPI_PASS=%s\n' "$PI_USER" "$PI_HOST" "$PI_PASS" >
 
 # Run first-boot setup
 echo -e "${YELLOW}Setting up your Pi...${NC}"
-echo -e "${BLUE}This will take a few minutes. The Pi will reboot automatically.${NC}"
+echo -e "${CORAL}This will take a few minutes. The Pi will reboot automatically.${NC}"
 echo ""
 
 cd "$TMP_DIR"
@@ -154,8 +163,8 @@ echo -e "${GREEN}  Your Plink frame is ready!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Open one of these URLs on your phone:"
-echo -e "  ${BLUE}http://pi.local${NC}"
-echo -e "  ${BLUE}http://192.168.1.50${NC}"
+echo -e "  ${CORAL}http://pi.local${NC}"
+echo -e "  ${CORAL}http://192.168.1.50${NC}"
 echo ""
 echo "Upload a photo and watch it appear on the e-ink display!"
 echo ""
