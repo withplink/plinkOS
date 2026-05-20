@@ -33,8 +33,8 @@ if ! command -v sshpass &> /dev/null; then
 fi
 
 # Prompt for Pi details
-read -p "Pi hostname or IP [192.168.1.50]: " PI_HOST
-PI_HOST="${PI_HOST:-192.168.1.50}"
+read -p "Pi hostname or IP [pi.local]: " PI_HOST
+PI_HOST="${PI_HOST:-pi.local}"
 
 read -p "Pi username [pi]: " PI_USER
 PI_USER="${PI_USER:-pi}"
@@ -89,6 +89,7 @@ git clone https://github.com/PixeledCode/pi-ink.git "$TMP_DIR" 2>/dev/null || {
 echo -e "${YELLOW}Configuring credentials...${NC}"
 cat > "$TMP_DIR/.env" << EOF
 PI_USER=$PI_USER
+PI_HOST=$PI_HOST
 PI_PASS=$PI_PASS
 EOF
 
@@ -98,6 +99,7 @@ echo -e "${BLUE}This will take a few minutes. The Pi will reboot automatically.$
 echo ""
 
 cd "$TMP_DIR"
+export PI_HOST
 bash pi-scripts/first-boot-setup.sh
 
 # Cleanup

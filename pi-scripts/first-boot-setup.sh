@@ -11,11 +11,12 @@ if [ -f "$SCRIPT_DIR/../.env" ]; then
 fi
 
 PI_USER="${PI_USER:-pi}"
+PI_HOST="${PI_HOST:-192.168.1.50}"
 if [ -z "$PI_PASS" ]; then
   echo "Error: PI_PASS not set. Copy .env.example to .env and fill in your Pi password."
   exit 1
 fi
-PI="$PI_USER@192.168.1.50"
+PI="$PI_USER@$PI_HOST"
 PI_HOME="/home/pi/PiInk"
 
 SSH="sshpass -p $PI_PASS ssh -o StrictHostKeyChecking=no $PI"

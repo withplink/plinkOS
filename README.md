@@ -57,7 +57,7 @@ Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for fir
 curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/pi-scripts/setup.sh | bash
 ```
 
-This will prompt for your Pi's password (the one you set during flashing), then handle everything automatically: SSH test, dependency install, display driver patch, service setup, and reboot.
+This will prompt for your Pi's password (the one you set during flashing). It connects via `pi.local` (mDNS/Bonjour — works out of the box on macOS/iOS), then handles everything: dependency install, display driver patch, static IP setup, service installation, and reboot.
 
 **Manual setup (alternative):**
 
