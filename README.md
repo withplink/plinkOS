@@ -1,6 +1,6 @@
 # Plink
 
-A mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an [Inky Impression](https://shop.pimoroni.com/products/inky-impression-7-3) e-ink display.
+A mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an [Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3) e-ink display.
 
 Send a moment to your plink.
 
@@ -8,7 +8,7 @@ Send a moment to your plink.
 
 - **Backend** — Flask (Python), runs on the Pi at port 80
 - **Frontend** — React 18 + Babel standalone (no build step), single `main.html` Jinja2 template
-- **Display** — Inky Impression 7-colour e-ink, driven by Pimoroni's Python library
+- **Display** — Inky Impression 7.3" Spectra 6 (E673 driver), 800×480, 7-colour e-ink
 
 ## Features
 
@@ -22,13 +22,13 @@ Send a moment to your plink.
 - Haptic feedback on iOS 18+ and Android
 - Swipe-to-dismiss sheets with spring animations
 - Device controls: rotate display, clear ghosting, reboot, shutdown
-- Hotspot/AP mode — Pi broadcasts `plink-setup` Wi-Fi for initial provisioning; iOS app detects AP mode and walks through WiFi credential setup
+- Hotspot/AP mode — Pi broadcasts `plink-setup` Wi-Fi for initial provisioning
 - Online/offline status dot — auto-detects connectivity, shows local URL hint when on Tailscale and Pi is unreachable
 
 ## Hardware
 
 - Raspberry Pi Zero 2W
-- Inky Impression e-ink display (7.3")
+- Inky Impression 7.3" e-ink display (Spectra 6 / E673 controller)
 
 ## Setup
 
@@ -70,6 +70,30 @@ From the repo root on your Mac:
 ```
 
 Copies both files to the Pi and restarts the service.
+
+## Display Driver Notes
+
+The Inky Impression 7.3" uses the **Spectra 6 (E673)** controller, identified via EEPROM. The codebase uses `inky.inky_e673` (not `inky_ac073tc1a`).
+
+### Critical boot config
+
+The following must be present in `/boot/firmware/config.txt`:
+
+```
+dtparam=spi=on
+dtoverlay=spi0-0cs
+```
+
+The `spi0-0cs` overlay disables the SPI driver's chip-select claim on GPIO8, which conflicts with the Inky library's gpiod pin requests. Without it, `show()` fails with "Chip Select: (line 8, GPIO8) currently claimed by spi0 CS0".
+
+### Inky library patch
+
+The `pi-scripts/patch_inky.py` script patches the installed Inky library (v2.x) to:
+1. Skip the GPIO pin availability check (fails on Bookworm)
+2. Not request the CS pin via gpiod (spidev owns it)
+3. Not manually toggle CS in `_spi_write` (spidev handles it)
+
+This runs automatically during `install.sh`.
 
 ## Design
 

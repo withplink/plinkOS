@@ -8,6 +8,8 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 
 - `webserver_new.py` → deployed to `/home/pi/PiInk/src/webserver.py` (Flask backend)
 - `main.html` → deployed to `/home/pi/PiInk/src/templates/main.html` (React frontend, single file)
+- `pi-scripts/patch_inky.py` → patches Inky library v2.x for GPIO/SPI compatibility (runs during install)
+- `pi-scripts/install.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
 
 ## Deploy Commands
 
@@ -21,7 +23,7 @@ sshpass -p '5409' scp main.html pi@pi.local:/home/pi/PiInk/src/templates/main.ht
 sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink && echo done"
 ```
 
-- SSH host: `pi@pi.local`, password: `5409`
+- SSH host: `pi@pi.local` or `192.168.1.50`, password: `5409`
 - Sudo password: same (`echo '5409' | sudo -S`)
 - Service: `piink` (systemd)
 
@@ -31,6 +33,34 @@ sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink
 - **Frontend:** React 18 + Babel standalone (no build step), Jinja2 template
 - JSX is wrapped in `{% raw %}...{% endraw %}` to avoid Jinja2 `{{}}` conflicts
 - No component library — all UI is hand-rolled with inline styles
+
+## Display Driver — CRITICAL
+
+- **Controller:** Spectra 6 (E673), identified via EEPROM on the display
+- **Python import:** `from inky.inky_e673 import Inky`
+- **NOT** `inky_ac073tc1a` — that's for older 7.3" revisions; using it causes `show()` to silently fail (no error, but display doesn't update)
+
+### Required boot config (`/boot/firmware/config.txt`)
+
+```
+dtparam=spi=on
+dtoverlay=spi0-0cs
+```
+
+The `spi0-0cs` overlay is **mandatory** on Pi Zero 2W + Bookworm. Without it, the SPI driver claims GPIO8 as chip-select, and the Inky library's gpiod requests fail with:
+```
+Woah there, some pins we need are in use!
+  ⚠️   Chip Select: (line 8, GPIO8) currently claimed by spi0 CS0
+```
+
+### Inky library patch (`patch_inky.py`)
+
+The Inky library v2.x (gpiod-based) has a conflict with spidev on the CS pin. The patch:
+1. Skips `gpiodevice.check_pins_available()` (fails on Bookworm)
+2. Removes CS pin from `request_lines()` config (spidev owns it)
+3. Removes manual CS toggle in `_spi_write()` (spidev handles it)
+
+Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `Bias.DISABLED` params).
 
 ## Frontend Architecture
 
@@ -79,6 +109,15 @@ sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink
 | `GET` | `/api/wifi/networks` | `{known, visible}` — known SSIDs from `wpa_supplicant.conf` + Pi scan results |
 | `POST` | `/api/wifi` | `{ssid, password?}` — write creds, trigger hotspot→client switch after 2s |
 | `GET/POST` | `/share-target` | Web Share Target receiver; accepts shared photos from OS share sheet |
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Display shows stale QR code, `show()` completes silently | Wrong driver (`inky_ac073tc1a` instead of `inky_e673`) | Use `inky.inky_e673.Inky` |
+| "Chip Select: GPIO8 currently claimed by spi0 CS0" | Missing `dtoverlay=spi0-0cs` in boot config | Add overlay, reboot |
+| `show()` fails with `FileNotFoundError: No such file or directory` | SPI not enabled | Add `dtparam=spi=on` to boot config |
+| GPIO event detection fails | `plink-buttons` service already claimed GPIO chip | Normal — webserver catches this and skips |
 
 ## GitHub
 
