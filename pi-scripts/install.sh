@@ -29,8 +29,12 @@ pip3 install flask pillow 'inky[rpi,fonts]' 'qrcode[pil]' zeroconf RPi.GPIO
 
 echo ""
 echo "=== Deploy webserver + frontend ==="
-cp "$SCRIPT_DIR/../webserver_new.py" "$PI_HOME/src/webserver.py"
-cp "$SCRIPT_DIR/../main.html"          "$PI_HOME/src/templates/main.html"
+if [ -f "$SCRIPT_DIR/../webserver_new.py" ]; then
+  cp "$SCRIPT_DIR/../webserver_new.py" "$PI_HOME/src/webserver.py"
+  cp "$SCRIPT_DIR/../main.html"          "$PI_HOME/src/templates/main.html"
+else
+  echo "(skipped — run deploy.sh from repo root instead)"
+fi
 
 echo ""
 echo "=== Install scripts ==="
