@@ -1,5 +1,8 @@
 #!/bin/bash
-# Plink one-line setup — curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/pi-scripts/setup.sh | bash
+# Plink one-line setup
+# Recommended: download first, then run
+#   curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/pi-scripts/setup.sh -o setup.sh
+#   bash setup.sh
 
 set -e
 
@@ -9,6 +12,21 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+
+# Read from terminal even when script is piped
+tty_read() {
+  local prompt="$1"
+  local varname="$2"
+  local hidden="$3"
+  local val=""
+  if [ "$hidden" = "1" ]; then
+    read -s -p "$prompt" val < /dev/tty
+    echo ""
+  else
+    read -p "$prompt" val < /dev/tty
+  fi
+  eval "$varname='$val'"
+}
 
 echo -e "${BLUE}"
 echo "  ___  _        _  _        "
@@ -27,26 +45,28 @@ if ! command -v sshpass &> /dev/null; then
   elif command -v apt-get &> /dev/null; then
     sudo apt-get install -y sshpass
   else
-    echo -e "${RED}Cannot install sshpass automatically. Please install it manually.${NC}"
+    echo -e "${RED}Cannot install sshpass automatically. Install it: brew install sshpass${NC}"
     exit 1
   fi
 fi
 
-# Prompt for Pi details
-read -p "Pi hostname or IP [pi.local]: " PI_HOST
+# Prompt for Pi details (from /dev/tty so it works with curl | bash)
+tty_read "Pi hostname or IP [pi.local]: " PI_HOST
 PI_HOST="${PI_HOST:-pi.local}"
 
-read -p "Pi username [pi]: " PI_USER
+tty_read "Pi username [pi]: " PI_USER
 PI_USER="${PI_USER:-pi}"
 
-# Password input (hidden)
-read -s -p "Pi password: " PI_PASS
-echo ""
+tty_read "Pi password: " PI_PASS 1
 
 if [ -z "$PI_PASS" ]; then
   echo -e "${RED}Error: password is required. You must set a password during Raspberry Pi Imager setup.${NC}"
   exit 1
 fi
+
+# Clear stale SSH host keys (common after reflashing)
+ssh-keygen -R "$PI_HOST" 2>/dev/null || true
+ssh-keygen -R "pi.local" 2>/dev/null || true
 
 # Test SSH connection
 try_connect() {
@@ -65,7 +85,7 @@ else
   LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
   if [ -z "$LOCAL_IP" ]; then
     echo -e "${RED}Could not determine local network. Please enter Pi IP manually:${NC}"
-    read -p "Pi IP address: " PI_HOST
+    tty_read "Pi IP address: " PI_HOST
   else
     SUBNET=$(echo "$LOCAL_IP" | cut -d. -f1-3)
     echo -e "${YELLOW}Scanning $SUBNET.0/24...${NC}"
@@ -94,7 +114,7 @@ else
       for i in "${!FOUND_PIS[@]}"; do
         echo "  $((i+1)). ${FOUND_PIS[$i]}"
       done
-      read -p "Select Pi number [1]: " SELECT
+      tty_read "Select Pi number [1]: " SELECT
       SELECT="${SELECT:-1}"
       PI_HOST="${FOUND_PIS[$((SELECT-1))]}"
     else
@@ -102,12 +122,13 @@ else
       echo "Look for a device in your router's DHCP client list, or try:"
       echo "  - pinging $SUBNET.1 through $SUBNET.254"
       echo "  - checking your router admin page for connected devices"
-      read -p "Enter Pi IP address: " PI_HOST
+      tty_read "Enter Pi IP address: " PI_HOST
     fi
   fi
   
   # Retry connection with discovered IP
   if [ -n "$PI_HOST" ]; then
+    ssh-keygen -R "$PI_HOST" 2>/dev/null || true
     echo -e "${YELLOW}Trying $PI_USER@$PI_HOST...${NC}"
     if ! try_connect "$PI_HOST"; then
       echo -e "${RED}Still cannot connect. Please verify:${NC}"
@@ -133,11 +154,7 @@ git clone https://github.com/PixeledCode/pi-ink.git "$TMP_DIR" 2>/dev/null || {
 
 # Create .env
 echo -e "${YELLOW}Configuring credentials...${NC}"
-cat > "$TMP_DIR/.env" << EOF
-PI_USER=$PI_USER
-PI_HOST=$PI_HOST
-PI_PASS=$PI_PASS
-EOF
+printf 'PI_USER=%s\nPI_HOST=%s\nPI_PASS=%s\n' "$PI_USER" "$PI_HOST" "$PI_PASS" > "$TMP_DIR/.env"
 
 # Run first-boot setup
 echo -e "${YELLOW}Setting up your Pi...${NC}"
