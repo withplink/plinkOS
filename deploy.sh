@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Load .env if present
+if [ -f "$(dirname "$0")/.env" ]; then
+  set -a
+  source "$(dirname "$0")/.env"
+  set +a
+fi
+
 PI_USER="${PI_USER:-pi}"
 PI_PASS="${PI_PASS:-5409}"
 HOST="$PI_USER@pi.local"

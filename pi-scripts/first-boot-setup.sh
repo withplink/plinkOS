@@ -2,6 +2,14 @@
 
 set -e
 
+# Load .env if present (repo root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/../.env" ]; then
+  set -a
+  source "$SCRIPT_DIR/../.env"
+  set +a
+fi
+
 PI_USER="${PI_USER:-pi}"
 PI_PASS="${PI_PASS:-5409}"
 PI="$PI_USER@192.168.1.50"
