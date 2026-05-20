@@ -19,12 +19,23 @@ tty_read() {
   local varname="$2"
   local hidden="$3"
   local val=""
-  if [ "$hidden" = "1" ]; then
-    read -s -p "$prompt" val < /dev/tty 2>/dev/null || read -s -p "$prompt" val
-    echo ""
+  if [ -t 0 ]; then
+    if [ "$hidden" = "1" ]; then
+      read -s -p "$prompt" val
+    else
+      read -p "$prompt" val
+    fi
+  elif [ -e /dev/tty ]; then
+    if [ "$hidden" = "1" ]; then
+      read -s -p "$prompt" val < /dev/tty
+    else
+      read -p "$prompt" val < /dev/tty
+    fi
   else
-    read -p "$prompt" val < /dev/tty 2>/dev/null || read -p "$prompt" val
+    echo -n "$prompt"
+    read val
   fi
+  echo ""
   eval "$varname='$val'"
 }
 
