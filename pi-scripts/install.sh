@@ -83,7 +83,10 @@ sudo systemctl enable piink plink-buttons plink-boot-check
 echo ""
 echo "=== Enable persistent systemd journal ==="
 sudo mkdir -p /var/log/journal
-sudo systemd-tmpfiles --create --prefix /var/log/journal
+MACHINE_ID=$(sudo cat /etc/machine-id)
+sudo mkdir -p /var/log/journal/$MACHINE_ID
+sudo chown root:systemd-journal /var/log/journal/$MACHINE_ID
+sudo chmod 2755 /var/log/journal/$MACHINE_ID
 sudo systemctl restart systemd-journald
 
 echo ""
