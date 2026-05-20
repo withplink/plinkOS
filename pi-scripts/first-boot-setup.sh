@@ -23,49 +23,38 @@ PI_HOME="/home/pi/PiInk"
 SSH="sshpass -p $PI_PASS ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $PI"
 SCP="sshpass -p $PI_PASS scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR"
 
-# Colors and symbols
+# Colors
 CORAL='\033[38;2;255;127;80m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-BLUE='\033[0;34m'
 NC='\033[0m'
-OK="${GREEN}✓${NC}"
-WAIT="${YELLOW}⋯${NC}"
-ERR="${RED}✗${NC}"
 BOLD='\033[1m'
 
-# Helper: run command, log to Pi, show spinner
 step() {
   local label="$1"
   shift
-  printf "  ${WAIT} %-50s" "$label"
+  printf "  ${YELLOW}⋯${NC} %s" "$label"
   if "$@" >>/tmp/plink-setup.log 2>&1; then
-    printf "\r  ${OK} ${label}\n"
+    printf "\r  ${GREEN}✓${NC} %s\n" "$label"
   else
-    printf "\r  ${ERR} ${label} (see /tmp/plink-setup.log on Pi)\n"
+    printf "\r  ${RED}✗${NC} %s (see /tmp/plink-setup.log on Pi)\n" "$label"
   fi
-}
-
-# Helper: run remote command silently, log on Pi
-run() {
-  $SSH "$1" >>/tmp/plink-setup.log 2>&1
 }
 
 echo ""
 
 # Wait for Pi
-printf "  ${WAIT} Waiting for Pi to come online"
+printf "  ${YELLOW}⋯${NC} Waiting for Pi to come online"
 until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" >>/tmp/plink-setup.log 2>/dev/null; do
   printf "."
   sleep 5
 done
-printf "\r  ${OK} Pi is online\n"
+printf "\r  ${GREEN}✓${NC} Pi is online\n"
 
 echo ""
-echo "  ${BOLD}Configuring Pi${NC}"
-echo ""
+printf "  ${BOLD}Configuring Pi${NC}\n\n"
 
 # Enable passwordless sudo
 step "Enable passwordless sudo" \
@@ -93,7 +82,7 @@ step "Patch Inky library for GPIO/SPI compatibility" \
   $SSH "sudo python3 /tmp/patch_inky.py"
 
 # System deps
-step "Install system packages (dnsmasq, hostapd, avahi)" \
+step "Install system packages" \
   $SSH "sudo apt-get update -qq && sudo apt-get install -y dnsmasq hostapd avahi-daemon -qq 2>/dev/null"
 
 # Deploy webserver + frontend
@@ -154,19 +143,18 @@ step "Install Avahi mDNS service" \
   $SSH "sudo bash -c 'mkdir -p /etc/avahi/services && cp /tmp/plink.avahi.service /etc/avahi/services/plink.service && systemctl restart avahi-daemon'"
 
 echo ""
-echo "  ${BOLD}Rebooting Pi${NC}"
-echo ""
+printf "  ${BOLD}Rebooting Pi${NC}\n\n"
 
 # Reboot
-run "sudo reboot"
-echo "  ${WAIT} Rebooting..."
+$SSH "sudo reboot" >>/tmp/plink-setup.log 2>&1 || true
+printf "  ${YELLOW}⋯${NC} Rebooting..."
 
 until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" >>/tmp/plink-setup.log 2>/dev/null; do
-  printf "  ${WAIT} Waiting for Pi to come back online\r"
+  printf "\r  ${YELLOW}⋯${NC} Waiting for Pi to come back online"
   sleep 5
 done
-printf "  ${OK} Pi is back online\n"
+printf "\r  ${GREEN}✓${NC} Pi is back online\n"
 
 sleep 3
 
@@ -174,26 +162,4 @@ sleep 3
 step "Start piink service" \
   $SSH "sudo systemctl start piink"
 
-# Check status
-STATUS=$($SSH "sudo systemctl is-active piink" 2>/dev/null)
-if [ "$STATUS" = "active" ]; then
-  echo ""
-  echo "  ${BOLD}${GREEN}Your Plink frame is ready!${NC}"
-  echo ""
-  echo "  Open on your phone:"
-  echo "    ${CORAL}http://pi.local${NC}"
-  echo "    ${CORAL}http://192.168.1.50${NC}"
-  echo ""
-  echo "  Upload a photo and watch it appear on the e-ink display!"
-  echo ""
-  echo "  ${BOLD}Frame Buttons${NC}"
-  echo "    Button A (hold 1.5s): Toggle hotspot mode"
-  echo "    Button B: Rotate image clockwise"
-  echo "    Button C: Rotate image counter-clockwise"
-  echo "    Button D: Reboot the Pi"
-else
-  echo ""
-  echo "  ${ERR} piink service is not running."
-  echo "  Check logs on Pi: ssh pi@pi.local 'sudo journalctl -u piink --no-pager -n 50'"
-  echo "  Full setup log:   ssh pi@pi.local 'cat /tmp/plink-setup.log'"
-fi
+echo ""

@@ -74,7 +74,7 @@ ssh-keygen -R "pi.local" 2>/dev/null || true
 # Test SSH connection
 try_connect() {
   local host="$1"
-  sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$PI_USER@$host" "echo ok" 2>/dev/null
+  sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$PI_USER@$host" "echo ok" >/dev/null 2>&1
 }
 
 echo -e "${YELLOW}Testing SSH connection to $PI_USER@$PI_HOST...${NC}"
