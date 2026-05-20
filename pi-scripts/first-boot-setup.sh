@@ -91,7 +91,7 @@ echo ""
 echo "=== Install Python deps ==="
 
 $SSH "
-pip3 install --break-system-packages \
+sudo pip3 install --break-system-packages \
   flask \
   pillow \
   'inky[rpi,fonts]' \
@@ -188,6 +188,7 @@ Wants=network-online.target
 ExecStart=/usr/bin/python3 /home/pi/PiInk/src/webserver.py
 WorkingDirectory=/home/pi/PiInk/src
 User=pi
+Environment=PYTHONPATH=/home/pi/.local/lib/python3.13/site-packages
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=5
