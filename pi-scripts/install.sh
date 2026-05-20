@@ -84,6 +84,10 @@ grep -q "dtparam=spi=on" /boot/firmware/config.txt && echo "SPI enabled" || echo
 grep -q "dtoverlay=spi0-0cs" /boot/firmware/config.txt && echo "SPI CS disabled (spi0-0cs overlay)" || echo "WARNING: spi0-0cs not found"
 
 echo ""
+echo "=== Patch Inky library for GPIO/SPI compatibility ==="
+python3 "$SCRIPT_DIR/patch_inky.py"
+
+echo ""
 echo "=== Install Avahi service ==="
 sudo mkdir -p /etc/avahi/services
 sudo cp "$SCRIPT_DIR/plink.avahi.service" /etc/avahi/services/plink.service
