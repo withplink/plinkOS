@@ -118,6 +118,29 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 | "Chip Select: GPIO8 currently claimed by spi0 CS0" | Missing `dtoverlay=spi0-0cs` in boot config | Add overlay, reboot |
 | `show()` fails with `FileNotFoundError: No such file or directory` | SPI not enabled | Add `dtparam=spi=on` to boot config |
 | GPIO event detection fails | `plink-buttons` service already claimed GPIO chip | Normal — webserver catches this and skips |
+| `ModuleNotFoundError: No module named 'inky'` (systemd) | `pip3 install` without `sudo` installs to `~/.local/` | Use `sudo pip3 install --break-system-packages` + add `Environment=PYTHONPATH=/home/pi/.local/lib/python3.13/site-packages` to systemd service |
+| `ValueError: (22, 'Invalid argument')` on `set_value(cs_pin)` | Inky library tries to toggle CS pin via gpiod, but spidev owns GPIO8 | Patch removes ALL `self._gpio.set_value(self.cs_pin, ...)` calls — SPI driver handles CS automatically |
+| `SyntaxError: illegal target for annotation` after patch | Patch replaced `if check_pins_available(` with `if True:` but left dict literal dangling | Use regex to replace entire `check_pins_available(gpiochip, { ... })` call including multi-line dict |
+| `nmcli connection up` breaks SSH mid-setup | Re-establishing WiFi drops active SSH session | Remove `nmcli connection up` — static IP applies after reboot |
+| SSH banner text repeats on every remote command | SSH allocates pseudo-terminal by default | Add `-T` flag to SSH commands |
+| `PermissionError` on `patch_inky.py` | Patch writes to `/usr/local/lib/python3.*/dist-packages/` (root-owned) | Run `sudo python3 patch_inky.py` |
+| `curl \| bash` breaks `read` prompts | stdin is the script content, not keyboard | Use `read < /dev/tty` or plain `read` (script runs in interactive shell) |
+| `deploy.sh` fails with `cp: cannot stat '../webserver_new.py'` | `install.sh` runs from `/tmp/plink-scripts/` — `../` doesn't point to repo root | `deploy.sh` handles webserver/frontend copy; `install.sh` skips it when run from `/tmp` |
+
+## Known Issues & Solutions (Session Log)
+
+### 2026-05-20 — Full setup debugging session
+
+1. **`tty_read` function lost during edit** — ASCII art edit accidentally removed the function definition. Fixed by restoring it.
+2. **`sshpass -p ""` in wait loops** — Both SSH wait loops used empty password instead of `$PI_PASS`. Fixed.
+3. **SSH banner spam** — Every `$SSH` call printed the Linux welcome banner. Fixed with `-T -q -o LogLevel=ERROR`.
+4. **`pip3 install` to user site** — Without `sudo`, inky installed to `~/.local/` which systemd can't find. Fixed with `sudo pip3 install --break-system-packages` + `PYTHONPATH` in service.
+5. **Inky patch didn't match E673's `_spi_write`** — E673 uses `xfer3` with try/except, not simple `xfer` loop. Original patch never matched. Fixed with regex that removes ALL `set_value(self.cs_pin, ...)` regardless of context.
+6. **`_send_command` still had CS pin manipulation** — Regex only matched `_spi_write` context. `_send_command` also calls `set_value(self.cs_pin, Value.ACTIVE)`. Fixed with broader regex: `re.sub(r'\s*self\._gpio\.set_value\(self\.cs_pin, Value\.(INACTIVE|ACTIVE)\)\s*\n', '\n', content)`.
+7. **`install.sh` tries to copy `webserver_new.py` from wrong path** — When run from `/tmp/plink-scripts/`, `../webserver_new.py` doesn't exist. Fixed: `install.sh` checks if file exists, skips if not (deploy.sh handles it).
+8. **`patch_inky.py` needs sudo** — Writes to system Python packages directory. Fixed in `install.sh` and `first-boot-setup.sh`.
+9. **`nmcli connection up` breaks SSH** — Drops WiFi connection mid-setup. Removed — static IP applies after reboot.
+10. **Default orientation** — Changed from portrait to landscape in `webserver_new.py` (`saveSettings("checked","",...)`).
 
 ## GitHub
 

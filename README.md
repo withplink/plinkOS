@@ -96,6 +96,16 @@ After the initial setup, push code changes with:
 
 Copies `webserver_new.py` and `main.html` to the Pi and restarts the service.
 
+## Resetting the Pi
+
+To clean the Pi back to a pre-install state (removes packages, services, configs):
+
+```bash
+bash pi-scripts/clean-pi.sh
+```
+
+Then re-run `setup.sh` for a fresh install.
+
 ## Display Driver Notes
 
 The Inky Impression 7.3" uses the **Spectra 6 (E673)** controller, identified via EEPROM. The codebase uses `inky.inky_e673` (not `inky_ac073tc1a`).

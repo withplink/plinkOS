@@ -19,166 +19,113 @@ fi
 PI="$PI_USER@$PI_HOST"
 PI_HOME="/home/pi/PiInk"
 
-SSH="sshpass -p $PI_PASS ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $PI"
+# SSH with -T to suppress banner, -q to suppress progress
+SSH="sshpass -p $PI_PASS ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $PI"
 SCP="sshpass -p $PI_PASS scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR"
 
-echo "=== Waiting for Pi to come online ==="
+# Colors and symbols
+CORAL='\033[38;2;255;127;80m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+OK="${GREEN}✓${NC}"
+WAIT="${YELLOW}⋯${NC}"
+ERR="${RED}✗${NC}"
+BOLD='\033[1m'
 
-until sshpass -p "$PI_PASS" ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
-  "$PI" "echo ok" 2>/dev/null; do
+# Helper: run command, log to Pi, show spinner
+step() {
+  local label="$1"
+  shift
+  printf "  ${WAIT} %-50s" "$label"
+  if "$@" >>/tmp/plink-setup.log 2>&1; then
+    printf "\r  ${OK} ${label}\n"
+  else
+    printf "\r  ${ERR} ${label} (see /tmp/plink-setup.log on Pi)\n"
+  fi
+}
 
-  echo "not reachable yet, retrying in 5s..."
+# Helper: run remote command silently, log on Pi
+run() {
+  $SSH "$1" >>/tmp/plink-setup.log 2>&1
+}
+
+echo ""
+
+# Wait for Pi
+printf "  ${WAIT} Waiting for Pi to come online"
+until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
+  "$PI" "echo ok" >>/tmp/plink-setup.log 2>/dev/null; do
+  printf "."
   sleep 5
 done
-
-echo "Pi is up."
-
-echo ""
-echo "=== Enable passwordless sudo ==="
-
-$SSH "echo '$PI_PASS' | sudo -S bash -c '
-echo \"pi ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/pi
-chmod 440 /etc/sudoers.d/pi
-'"
+printf "\r  ${OK} Pi is online\n"
 
 echo ""
-echo "=== Static IP + IPv6 link-local ==="
-
-$SSH <<'REMOTE'
-sudo bash <<'EOF'
-CON=$(nmcli -t -f NAME connection show --active | grep wlan | head -1)
-
-nmcli connection modify "$CON" \
-  ipv4.addresses 192.168.1.50/24 \
-  ipv4.gateway 192.168.1.1 \
-  ipv4.dns "8.8.8.8 1.1.1.1" \
-  ipv4.method manual \
-  ipv6.method link-local
-
-echo "Static IP profile saved — will apply after reboot"
-EOF
-REMOTE
-
+echo "  ${BOLD}Configuring Pi${NC}"
 echo ""
-echo "=== Disable WiFi power save ==="
 
-$SSH <<'REMOTE'
-sudo bash <<'EOF'
-mkdir -p /etc/NetworkManager/conf.d
+# Enable passwordless sudo
+step "Enable passwordless sudo" \
+  $SSH "echo '$PI_PASS' | sudo -S bash -c 'echo \"pi ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/pi && chmod 440 /etc/sudoers.d/pi'"
 
-cat > /etc/NetworkManager/conf.d/wifi-powersave.conf <<CONF
-[connection]
-wifi.powersave=2
-CONF
+# Static IP
+step "Save static IP profile (applies after reboot)" \
+  $SSH "sudo bash -c 'CON=\$(nmcli -t -f NAME connection show --active | grep wlan | head -1) && nmcli connection modify \"\$CON\" ipv4.addresses 192.168.1.50/24 ipv4.gateway 192.168.1.1 ipv4.dns \"8.8.8.8 1.1.1.1\" ipv4.method manual ipv6.method link-local'"
 
-systemctl restart NetworkManager
-sleep 3
-EOF
-REMOTE
+# WiFi power save
+step "Disable WiFi power save" \
+  $SSH "sudo bash -c 'mkdir -p /etc/NetworkManager/conf.d && echo -e \"[connection]\nwifi.powersave=2\" > /etc/NetworkManager/conf.d/wifi-powersave.conf && systemctl restart NetworkManager'"
 
-echo ""
-echo "=== Create directory structure ==="
+# Directory structure
+step "Create directory structure" \
+  $SSH "mkdir -p $PI_HOME/src/templates $PI_HOME/config $PI_HOME/uploads $PI_HOME/scripts"
 
-$SSH "
-mkdir -p \
-  $PI_HOME/src/templates \
-  $PI_HOME/config \
-  $PI_HOME/uploads \
-  $PI_HOME/scripts
-"
+# Python deps
+step "Install Python dependencies" \
+  $SSH "sudo pip3 install --break-system-packages flask pillow 'inky[rpi,fonts]' 'qrcode[pil]' 2>/dev/null"
 
-echo ""
-echo "=== Install Python deps ==="
+# Patch Inky
+step "Patch Inky library for GPIO/SPI compatibility" \
+  $SCP pi-scripts/patch_inky.py "$PI:/tmp/patch_inky.py" && \
+  $SSH "sudo python3 /tmp/patch_inky.py"
 
-$SSH "
-sudo pip3 install --break-system-packages \
-  flask \
-  pillow \
-  'inky[rpi,fonts]' \
-  'qrcode[pil]'
-"
+# System deps
+step "Install system packages (dnsmasq, hostapd, avahi)" \
+  $SSH "sudo apt-get update -qq && sudo apt-get install -y dnsmasq hostapd avahi-daemon -qq 2>/dev/null"
 
-echo ""
-echo "=== Patch Inky library for GPIO/SPI compatibility ==="
+# Deploy webserver + frontend
+step "Deploy webserver and frontend" \
+  $SCP webserver_new.py "$PI:$PI_HOME/src/webserver.py" && \
+  $SCP main.html "$PI:$PI_HOME/src/templates/main.html"
 
-$SCP pi-scripts/patch_inky.py "$PI:/tmp/patch_inky.py"
-$SSH "sudo python3 /tmp/patch_inky.py"
+# Boot config
+step "Enable SPI + disable CS conflict" \
+  $SSH "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\""
 
-echo ""
-echo "=== Install system deps ==="
+# Install scripts
+step "Install helper scripts" \
+  $SCP pi-scripts/scripts/toggle_hotspot.sh "$PI:$PI_HOME/scripts/toggle_hotspot.sh" && \
+  $SCP pi-scripts/scripts/show_hotspot_screen.py "$PI:$PI_HOME/scripts/show_hotspot_screen.py" && \
+  $SCP pi-scripts/scripts/check_wifi_boot.sh "$PI:$PI_HOME/scripts/check_wifi_boot.sh" && \
+  $SCP pi-scripts/button_listener.py "$PI:$PI_HOME/src/button_listener.py" && \
+  $SSH "chmod +x $PI_HOME/scripts/toggle_hotspot.sh $PI_HOME/scripts/check_wifi_boot.sh"
 
-$SSH "
-sudo apt-get update -qq
-sudo apt-get install -y dnsmasq hostapd avahi-daemon
-"
+# dnsmasq config
+step "Install dnsmasq config" \
+  $SCP pi-scripts/dnsmasq.conf "$PI:/tmp/dnsmasq.conf" && \
+  $SSH "sudo cp /tmp/dnsmasq.conf /etc/dnsmasq.conf"
 
-echo ""
-echo "=== Deploy webserver + frontend ==="
-
-$SCP webserver_new.py \
-  "$PI:$PI_HOME/src/webserver.py"
-
-$SCP main.html \
-  "$PI:$PI_HOME/src/templates/main.html"
-
-echo ""
-echo "=== Enable SPI + disable CS conflict in boot config ==="
-
-$SSH "
-sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt
-grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\"
-echo 'Boot config updated — reboot required for changes to take effect'
-"
-
-echo ""
-echo "=== Install scripts ==="
-
-$SCP pi-scripts/scripts/toggle_hotspot.sh \
-  "$PI:$PI_HOME/scripts/toggle_hotspot.sh"
-
-$SCP pi-scripts/scripts/show_hotspot_screen.py \
-  "$PI:$PI_HOME/scripts/show_hotspot_screen.py"
-
-$SCP pi-scripts/scripts/check_wifi_boot.sh \
-  "$PI:$PI_HOME/scripts/check_wifi_boot.sh"
-
-$SCP pi-scripts/button_listener.py \
-  "$PI:$PI_HOME/src/button_listener.py"
-
-$SSH "
-chmod +x \
-  $PI_HOME/scripts/toggle_hotspot.sh \
-  $PI_HOME/scripts/check_wifi_boot.sh
-"
-
-echo ""
-echo "=== Install dnsmasq config ==="
-
-$SCP pi-scripts/dnsmasq.conf \
-  "$PI:/tmp/dnsmasq.conf"
-
-$SSH "
-sudo cp /tmp/dnsmasq.conf /etc/dnsmasq.conf
-"
-
-echo ""
-echo "=== Install systemd services ==="
-
-$SCP pi-scripts/plink-buttons.service \
-  "$PI:/tmp/plink-buttons.service"
-
-$SCP pi-scripts/plink-boot-check.service \
-  "$PI:/tmp/plink-boot-check.service"
-
-$SSH <<'REMOTE'
-sudo bash <<'EOF'
-cp /tmp/plink-buttons.service \
-  /etc/systemd/system/plink-buttons.service
-
-cp /tmp/plink-boot-check.service \
-  /etc/systemd/system/plink-boot-check.service
-
-cat > /etc/systemd/system/piink.service <<SERVICE
+# systemd services
+step "Install systemd services" \
+  $SCP pi-scripts/plink-buttons.service "$PI:/tmp/plink-buttons.service" && \
+  $SCP pi-scripts/plink-boot-check.service "$PI:/tmp/plink-boot-check.service" && \
+  $SSH "sudo bash -c '
+    cp /tmp/plink-buttons.service /etc/systemd/system/plink-buttons.service
+    cp /tmp/plink-boot-check.service /etc/systemd/system/plink-boot-check.service
+    cat > /etc/systemd/system/piink.service <<SERVICE
 [Unit]
 Description=Plink e-ink frame server
 After=network-online.target
@@ -196,63 +143,57 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SERVICE
+    systemctl daemon-reload
+    systemctl enable piink plink-buttons plink-boot-check
+    systemctl unmask hostapd || true
+  '"
 
-systemctl daemon-reload
-
-systemctl enable \
-  piink \
-  plink-buttons \
-  plink-boot-check
-
-systemctl unmask hostapd || true
-EOF
-REMOTE
+# Avahi
+step "Install Avahi mDNS service" \
+  $SCP pi-scripts/plink.avahi.service "$PI:/tmp/plink.avahi.service" && \
+  $SSH "sudo bash -c 'mkdir -p /etc/avahi/services && cp /tmp/plink.avahi.service /etc/avahi/services/plink.service && systemctl restart avahi-daemon'"
 
 echo ""
-echo "=== Install Avahi service ==="
-
-$SCP pi-scripts/plink.avahi.service \
-  "$PI:/tmp/plink.avahi.service"
-
-$SSH <<'REMOTE'
-sudo bash <<'EOF'
-mkdir -p /etc/avahi/services
-
-cp /tmp/plink.avahi.service \
-  /etc/avahi/services/plink.service
-
-systemctl restart avahi-daemon
-EOF
-REMOTE
-
+echo "  ${BOLD}Rebooting Pi${NC}"
 echo ""
-echo "=== Start piink ==="
 
-$SSH "
-sudo reboot
-"
+# Reboot
+run "sudo reboot"
+echo "  ${WAIT} Rebooting..."
 
-echo "Pi is rebooting (boot config changes require reboot)..."
-echo "Waiting for Pi to come back online..."
-
-until sshpass -p "$PI_PASS" ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
-  "$PI" "echo ok" 2>/dev/null; do
-
-  echo "not reachable yet, retrying in 5s..."
+until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
+  "$PI" "echo ok" >>/tmp/plink-setup.log 2>/dev/null; do
+  printf "  ${WAIT} Waiting for Pi to come back online\r"
   sleep 5
 done
-
-echo "Pi is back online."
+printf "  ${OK} Pi is back online\n"
 
 sleep 3
 
-$SSH "
-sudo systemctl start piink
-sleep 3
-sudo systemctl status piink --no-pager | head -10
-"
+# Start piink
+step "Start piink service" \
+  $SSH "sudo systemctl start piink"
 
-echo ""
-echo "=== Done ==="
-echo "http://pi.local"
-echo "http://192.168.1.50"
+# Check status
+STATUS=$($SSH "sudo systemctl is-active piink" 2>/dev/null)
+if [ "$STATUS" = "active" ]; then
+  echo ""
+  echo "  ${BOLD}${GREEN}Your Plink frame is ready!${NC}"
+  echo ""
+  echo "  Open on your phone:"
+  echo "    ${CORAL}http://pi.local${NC}"
+  echo "    ${CORAL}http://192.168.1.50${NC}"
+  echo ""
+  echo "  Upload a photo and watch it appear on the e-ink display!"
+  echo ""
+  echo "  ${BOLD}Frame Buttons${NC}"
+  echo "    Button A (hold 1.5s): Toggle hotspot mode"
+  echo "    Button B: Rotate image clockwise"
+  echo "    Button C: Rotate image counter-clockwise"
+  echo "    Button D: Reboot the Pi"
+else
+  echo ""
+  echo "  ${ERR} piink service is not running."
+  echo "  Check logs on Pi: ssh pi@pi.local 'sudo journalctl -u piink --no-pager -n 50'"
+  echo "  Full setup log:   ssh pi@pi.local 'cat /tmp/plink-setup.log'"
+fi
