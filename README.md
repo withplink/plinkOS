@@ -49,22 +49,23 @@ In the imager's advanced settings (gear icon):
 
 Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for first boot.
 
-### 3. Configure credentials
+### 3. Run setup
 
-Clone this repo and create a `.env` file with the **same password you set during flashing**:
+**One-line setup (recommended):**
+
+```bash
+curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/pi-scripts/setup.sh | bash
+```
+
+This will prompt for your Pi's password (the one you set during flashing), then handle everything automatically: SSH test, dependency install, display driver patch, service setup, and reboot.
+
+**Manual setup (alternative):**
 
 ```bash
 git clone https://github.com/PixeledCode/pi-ink.git
 cd pi-ink
 cp .env.example .env
 # Edit .env — PI_PASS must match the password from step 1
-```
-
-### 4. Run first-boot setup
-
-Make sure `sshpass` is installed (`brew install sshpass`), then:
-
-```bash
 bash pi-scripts/first-boot-setup.sh
 ```
 
@@ -81,7 +82,7 @@ The script will:
 - Reboot the Pi (required for boot config changes)
 - Start the frame server
 
-### 5. Done
+### 4. Done
 
 The frame is live at `http://pi.local` or `http://192.168.1.50`. Open it on your phone and upload a photo.
 
