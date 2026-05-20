@@ -49,32 +49,78 @@ if [ -z "$PI_PASS" ]; then
 fi
 
 # Test SSH connection
+try_connect() {
+  local host="$1"
+  sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$PI_USER@$host" "echo ok" 2>/dev/null
+}
+
 echo -e "${YELLOW}Testing SSH connection to $PI_USER@$PI_HOST...${NC}"
 
-ATTEMPTS=0
-MAX_ATTEMPTS=3
-while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-  if sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$PI_USER@$PI_HOST" "echo ok" 2>/dev/null; then
+if try_connect "$PI_HOST"; then
+  echo -e "${GREEN}Connected via $PI_HOST!${NC}"
+else
+  echo -e "${YELLOW}Could not reach $PI_HOST. Scanning local network for Raspberry Pi...${NC}"
+  
+  # Get local subnet
+  LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+  if [ -z "$LOCAL_IP" ]; then
+    echo -e "${RED}Could not determine local network. Please enter Pi IP manually:${NC}"
+    read -p "Pi IP address: " PI_HOST
+  else
+    SUBNET=$(echo "$LOCAL_IP" | cut -d. -f1-3)
+    echo -e "${YELLOW}Scanning $SUBNET.0/24...${NC}"
+    
+    # Quick ARP scan - ping all hosts then check arp table
+    for i in $(seq 1 254); do
+      ping -c 1 -t 1 "$SUBNET.$i" >/dev/null 2>&1 &
+    done
+    wait
+    
+    # Find Raspberry Pi MACs in arp table
+    FOUND_PIS=()
+    while IFS= read -r line; do
+      IP=$(echo "$line" | awk '{print $1}')
+      MAC=$(echo "$line" | awk '{print $4}')
+      if echo "$MAC" | grep -qi "^88:a2:9e"; then
+        FOUND_PIS+=("$IP")
+      fi
+    done < <(arp -a | grep -i "88:a2:9e")
+    
+    if [ ${#FOUND_PIS[@]} -eq 1 ]; then
+      PI_HOST="${FOUND_PIS[0]}"
+      echo -e "${GREEN}Found Raspberry Pi at $PI_HOST${NC}"
+    elif [ ${#FOUND_PIS[@]} -gt 1 ]; then
+      echo -e "${YELLOW}Found multiple Raspberry Pi devices:${NC}"
+      for i in "${!FOUND_PIS[@]}"; do
+        echo "  $((i+1)). ${FOUND_PIS[$i]}"
+      done
+      read -p "Select Pi number [1]: " SELECT
+      SELECT="${SELECT:-1}"
+      PI_HOST="${FOUND_PIS[$((SELECT-1))]}"
+    else
+      echo -e "${YELLOW}No Raspberry Pi found via MAC scan.${NC}"
+      echo "Look for a device in your router's DHCP client list, or try:"
+      echo "  - pinging $SUBNET.1 through $SUBNET.254"
+      echo "  - checking your router admin page for connected devices"
+      read -p "Enter Pi IP address: " PI_HOST
+    fi
+  fi
+  
+  # Retry connection with discovered IP
+  if [ -n "$PI_HOST" ]; then
+    echo -e "${YELLOW}Trying $PI_USER@$PI_HOST...${NC}"
+    if ! try_connect "$PI_HOST"; then
+      echo -e "${RED}Still cannot connect. Please verify:${NC}"
+      echo "  1. The Pi is powered on and on the same network"
+      echo "  2. SSH was enabled during Raspberry Pi Imager setup"
+      echo "  3. The password matches what you set during flashing"
+      echo ""
+      echo -e "${RED}Note: Raspberry Pi OS requires a password to be set during imaging.${NC}"
+      echo -e "${RED}If you left it blank, reflash the SD card and set a password.${NC}"
+      exit 1
+    fi
     echo -e "${GREEN}Connected!${NC}"
-    break
   fi
-  ATTEMPTS=$((ATTEMPTS + 1))
-  if [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; then
-    echo -e "${YELLOW}Connection failed. Retrying ($ATTEMPTS/$MAX_ATTEMPTS)...${NC}"
-    sleep 3
-  fi
-done
-
-if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
-  echo ""
-  echo -e "${RED}Could not connect to the Pi. Please check:${NC}"
-  echo "  1. The Pi is powered on and connected to the same network"
-  echo "  2. SSH was enabled during Raspberry Pi Imager setup"
-  echo "  3. The password matches what you set during flashing"
-  echo ""
-  echo -e "${RED}Note: Raspberry Pi OS requires a password to be set during imaging.${NC}"
-  echo -e "${RED}If you left it blank, reflash the SD card and set a password.${NC}"
-  exit 1
 fi
 
 # Clone repo
