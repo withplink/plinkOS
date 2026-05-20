@@ -31,12 +31,12 @@ tty_read() {
 # Header — stylized e-ink display frame
 print_header() {
   echo ""
-  echo "${DIM}╭────────────────────────╮${NC}"
-  echo "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}"
-  echo "${DIM}│${NC}  ${CYAN}░${NC}    ${WHITE}Plink${NC}     ${CYAN}░${NC}  ${DIM}│${NC}"
-  echo "${DIM}│${NC}  ${CYAN}░${NC}  e-ink frame ${CYAN}░${NC}  ${DIM}│${NC}"
-  echo "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}"
-  echo "${DIM}╰────────────────────────╯${NC}"
+  printf "${DIM}╭────────────────────────╮${NC}\n"
+  printf "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}  ${CYAN}░${NC}      ${WHITE}Plink${NC}       ${CYAN}░${NC}  ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}  ${CYAN}░${NC}   e-ink frame    ${CYAN}░${NC}  ${DIM}│${NC}\n"
+  printf "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}\n"
+  printf "${DIM}╰────────────────────────╯${NC}\n"
   echo ""
 }
 
