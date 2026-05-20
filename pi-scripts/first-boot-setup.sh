@@ -80,7 +80,7 @@ until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ER
   printf "."
   sleep 5
 done
-printf "\r  ${GREEN}✓${NC} Pi is online\n"
+printf "\r  ${GREEN}✓${NC} Pi is online                                   \n"
 
 echo ""
 printf "  ${BOLD}Configuring Pi${NC}\n\n"
@@ -180,10 +180,10 @@ printf "  ${YELLOW}⋯${NC} Rebooting..."
 
 until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=5 \
   "$PI" "echo ok" >>/tmp/plink-setup.log 2>/dev/null; do
-  printf "\r  ${YELLOW}⋯${NC} Waiting for Pi to come back online"
+  printf "\r  ${YELLOW}⋯${NC} Waiting for Pi to come back online              "
   sleep 5
 done
-printf "\r  ${GREEN}✓${NC} Pi is back online\n"
+printf "\r  ${GREEN}✓${NC} Pi is back online                                \n"
 
 sleep 3
 
