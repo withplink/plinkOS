@@ -56,18 +56,18 @@ step() {
   shift
   if [ "$VERBOSE" -eq 1 ]; then
     printf "  ${BOLD}→${NC} %s\n" "$label"
-    "$@" 2>&1
+    "$@" 2>&1 || true
   else
     spinner_start "$label" &
     SPINNER_PID=$!
     if "$@" >/dev/null 2>&1; then
-      kill "$SPINNER_PID" 2>/dev/null
-      wait "$SPINNER_PID" 2>/dev/null
+      kill "$SPINNER_PID" 2>/dev/null || true
+      wait "$SPINNER_PID" 2>/dev/null || true
       printf "\r  ${GREEN}✓${NC} %s\n" "$label"
     else
-      kill "$SPINNER_PID" 2>/dev/null
-      wait "$SPINNER_PID" 2>/dev/null
-      printf "\r  ${RED}✗${NC} %s (run with --verbose to see full logs)\n" "$label"
+      kill "$SPINNER_PID" 2>/dev/null || true
+      wait "$SPINNER_PID" 2>/dev/null || true
+      printf "\r  ${RED}✗${NC} %s (run with -v to see full logs)\n" "$label"
     fi
   fi
 }
