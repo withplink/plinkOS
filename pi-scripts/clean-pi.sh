@@ -26,16 +26,16 @@ SSH="sshpass -p $PI_PASS ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $P
 echo "=== Cleaning Pi ==="
 
 $SSH "
-  sudo systemctl stop piink plink-buttons plink-boot-check 2>/dev/null || true
-  sudo rm -rf /home/pi/PiInk /home/pi/scripts
-  sudo rm -f /etc/systemd/system/piink.service /etc/systemd/system/plink-buttons.service /etc/systemd/system/plink-boot-check.service
-  sudo rm -f /etc/avahi/services/plink.service
-  sudo rm -f /etc/dnsmasq.conf
-  sudo rm -f /etc/NetworkManager/conf.d/wifi-powersave.conf
-  sudo rm -f /etc/sudoers.d/pi
-  sudo sed -i '/dtoverlay=spi0-0cs/d' /boot/firmware/config.txt
-  sudo rm -f /tmp/patch_inky.py /tmp/plink-buttons.service /tmp/plink-boot-check.service /tmp/plink.avahi.service /tmp/dnsmasq.conf
-  sudo rm -rf /home/pi/.local/lib/python3.*/site-packages/inky
+  echo '$PI_PASS' | sudo -S systemctl stop piink plink-buttons plink-boot-check 2>/dev/null || true
+  echo '$PI_PASS' | sudo -S rm -rf /home/pi/PiInk /home/pi/scripts
+  echo '$PI_PASS' | sudo -S rm -f /etc/systemd/system/piink.service /etc/systemd/system/plink-buttons.service /etc/systemd/system/plink-boot-check.service
+  echo '$PI_PASS' | sudo -S rm -f /etc/avahi/services/plink.service
+  echo '$PI_PASS' | sudo -S rm -f /etc/dnsmasq.conf
+  echo '$PI_PASS' | sudo -S rm -f /etc/NetworkManager/conf.d/wifi-powersave.conf
+  echo '$PI_PASS' | sudo -S rm -f /etc/sudoers.d/pi
+  echo '$PI_PASS' | sudo -S sed -i '/dtoverlay=spi0-0cs/d' /boot/firmware/config.txt
+  echo '$PI_PASS' | sudo -S rm -f /tmp/patch_inky.py /tmp/plink-buttons.service /tmp/plink-boot-check.service /tmp/plink.avahi.service /tmp/dnsmasq.conf
+  echo '$PI_PASS' | sudo -S rm -rf /home/pi/.local/lib/python3.*/site-packages/inky
   echo 'Pi cleaned successfully'
 "
 
