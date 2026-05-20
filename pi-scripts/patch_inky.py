@@ -7,6 +7,7 @@ Usage: sudo python3 patch_inky.py
 """
 import os
 import glob
+import re
 
 def patch_inky_file(path):
     with open(path, "r") as f:
@@ -15,9 +16,6 @@ def patch_inky_file(path):
     original = content
 
     # 1. Skip GPIO pin availability check — replace entire if condition
-    # Original: if gpiodevice.check_pins_available(gpiochip, { ... }):
-    # Becomes:  if True:  (body still runs, but pin check is skipped)
-    import re
     content = re.sub(
         r'if gpiodevice\.check_pins_available\(gpiochip, \{.*?\}\):',
         'if True:  # Skip GPIO pin check — SPI driver handles CS',
@@ -26,21 +24,7 @@ def patch_inky_file(path):
     )
 
     # 2. Don't request CS pin via gpiod (spidev owns it)
-    old_request = """self._gpio = gpiochip.request_lines(consumer="inky", config={
-                        self.cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
-                        self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-                        self.reset_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
-                        self.busy_pin: gpiod.LineSettings(direction=Direction.INPUT, edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=10))
-                    })"""
-    new_request = """# Only request DC, RESET, BUSY — SPI driver handles CS
-                    self._gpio = gpiochip.request_lines(consumer="inky", config={
-                        self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-                        self.reset_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
-                        self.busy_pin: gpiod.LineSettings(direction=Direction.INPUT, edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=10))
-                    })"""
-    content = content.replace(old_request, new_request)
-
-    # Also handle E673 variant (with bias params)
+    # E673 variant (with bias params)
     old_request_e673 = """self._gpio = gpiochip.request_lines(consumer="inky", config={
                         self.cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE, bias=Bias.DISABLED),
                         self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE, bias=Bias.DISABLED),
@@ -55,26 +39,33 @@ def patch_inky_file(path):
                     })"""
     content = content.replace(old_request_e673, new_request_e673)
 
+    # Non-E673 variant (no bias params)
+    old_request = """self._gpio = gpiochip.request_lines(consumer="inky", config={
+                        self.cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
+                        self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+                        self.reset_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
+                        self.busy_pin: gpiod.LineSettings(direction=Direction.INPUT, edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=10))
+                    })"""
+    new_request = """# Only request DC, RESET, BUSY — SPI driver handles CS
+                    self._gpio = gpiochip.request_lines(consumer="inky", config={
+                        self.dc_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+                        self.reset_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
+                        self.busy_pin: gpiod.LineSettings(direction=Direction.INPUT, edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=10))
+                    })"""
+    content = content.replace(old_request, new_request)
+
     # 3. Don't manually control CS pin in _spi_write (spidev handles it)
-    old_spi = """self._gpio.set_value(self.cs_pin, Value.INACTIVE)
-        self._gpio.set_value(self.dc_pin, Value.ACTIVE if dc else Value.INACTIVE)
-
-        if isinstance(values, str):
-            values = [ord(c) for c in values]
-
-        for byte_value in values:
-            self._spi_bus.xfer([byte_value])
-
-        self._gpio.set_value(self.cs_pin, Value.ACTIVE)"""
-    new_spi = """# CS handled by SPI driver
-        self._gpio.set_value(self.dc_pin, Value.ACTIVE if dc else Value.INACTIVE)
-
-        if isinstance(values, str):
-            values = [ord(c) for c in values]
-
-        for byte_value in values:
-            self._spi_bus.xfer([byte_value])"""
-    content = content.replace(old_spi, new_spi)
+    # Remove the two cs_pin set_value lines — works for any _spi_write variant
+    content = re.sub(
+        r'(\s+)self\._gpio\.set_value\(self\.cs_pin, Value\.INACTIVE\)\n(\s+)(self\._gpio\.set_value\(self\.dc_pin)',
+        r'\2# CS handled by SPI driver\n\2\3',
+        content
+    )
+    content = re.sub(
+        r'\n(\s+)self\._gpio\.set_value\(self\.cs_pin, Value\.ACTIVE\)\n(\s+)(def |return |$)',
+        r'\n\2\3',
+        content
+    )
 
     if content != original:
         with open(path, "w") as f:

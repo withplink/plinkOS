@@ -655,7 +655,7 @@ def loadSettings():
     try:
         jsonFile = open(os.path.join(PATH,"config/settings.json"))
     except:
-        saveSettings("","checked",'aria-checked="false"')
+        saveSettings("checked","",'aria-checked="false"')
         jsonFile = open(os.path.join(PATH,"config/settings.json"))
     settingsData = json.load(jsonFile)
     jsonFile.close()
