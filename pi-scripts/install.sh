@@ -1,6 +1,6 @@
 #!/bin/bash
 # Full Plink install — runs ON the Pi.
-# Usage: sshpass -p '5409' ssh pi@pi.local 'bash -s' < pi-scripts/install.sh
+# Usage: sshpass -p '<PI_PASS>' ssh pi@pi.local 'bash -s' < pi-scripts/install.sh
 # Or copy to Pi and run: bash install.sh
 
 set -e
