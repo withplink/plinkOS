@@ -68,8 +68,8 @@ if [ -z "$PI_PASS" ]; then
 fi
 
 # Clear stale SSH host keys (common after reflashing)
-ssh-keygen -R "$PI_HOST" 2>/dev/null || true
-ssh-keygen -R "pi.local" 2>/dev/null || true
+ssh-keygen -R "$PI_HOST" >/dev/null 2>&1 || true
+ssh-keygen -R "pi.local" >/dev/null 2>&1 || true
 
 # Test SSH connection
 try_connect() {
