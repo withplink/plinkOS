@@ -59,6 +59,12 @@ curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/pi-scripts/se
 
 This will prompt for your Pi's password (the one you set during flashing). It connects via `pi.local` (mDNS/Bonjour — works out of the box on macOS/iOS), then handles everything: dependency install, display driver patch, static IP setup, service installation, and reboot. Stale SSH host keys from reflashing are cleared automatically.
 
+Add `--verbose` or `-v` to see full command output instead of the default spinner:
+
+```bash
+bash setup.sh --verbose
+```
+
 **Manual setup (alternative):**
 
 ```bash
@@ -104,7 +110,7 @@ To clean the Pi back to a pre-install state (removes packages, services, configs
 bash pi-scripts/clean-pi.sh
 ```
 
-Then re-run `setup.sh` for a fresh install.
+Add `--verbose` or `-v` to see full command output instead of the default spinner. Then re-run `setup.sh` for a fresh install.
 
 ## Display Driver Notes
 

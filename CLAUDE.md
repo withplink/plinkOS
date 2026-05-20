@@ -10,6 +10,15 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 - `main.html` → deployed to `/home/pi/PiInk/src/templates/main.html` (React frontend, single file)
 - `pi-scripts/patch_inky.py` → patches Inky library v2.x for GPIO/SPI compatibility (runs during install)
 - `pi-scripts/install.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
+- `pi-scripts/first-boot-setup.sh` → remote setup (called by `setup.sh`, has spinner UI)
+- `pi-scripts/clean-pi.sh` → resets Pi to pre-install state
+- `pi-scripts/setup.sh` → one-line entry point (curl | bash compatible)
+
+### Setup Script UX
+
+- Default mode: animated spinner per step, all output logged to `/tmp/plink-setup.log` on Pi
+- `--verbose` or `-v`: shows full command output inline, no spinner, no log file
+- SSH uses `-T -q -o LogLevel=ERROR` to suppress Linux banners and progress indicators
 
 ## Deploy Commands
 
