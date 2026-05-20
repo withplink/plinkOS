@@ -37,11 +37,11 @@ From unboxing to a working frame:
 
 ### 1. Flash the microSD card
 
-Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/). **Important: use Raspberry Pi OS Lite (Bookworm) 32-bit** — the 64-bit version has GPIO compatibility issues with the Inky library.
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/). **Important: use Raspberry Pi OS (Bookworm) 32-bit** — the 64-bit version has GPIO compatibility issues with the Inky library.
 
 In the imager's advanced settings (gear icon):
 - Hostname: `pi`
-- Username: `pi`, Password: `5409`
+- Set a username and password (remember these — you'll need them for SSH)
 - WiFi: your home network
 - Enable SSH
 
@@ -60,6 +60,7 @@ bash pi-scripts/first-boot-setup.sh
 ```
 
 The script will:
+
 - Wait for the Pi to come online
 - Set static IP `192.168.1.50`
 - Enable SPI + add `dtoverlay=spi0-0cs` (required for the display)
@@ -103,6 +104,7 @@ The `spi0-0cs` overlay disables the SPI driver's chip-select claim on GPIO8, whi
 ### Inky library patch
 
 The `pi-scripts/patch_inky.py` script patches the installed Inky library (v2.x) to:
+
 1. Skip the GPIO pin availability check (fails on Bookworm)
 2. Not request the CS pin via gpiod (spidev owns it)
 3. Not manually toggle CS in `_spi_write` (spidev handles it)

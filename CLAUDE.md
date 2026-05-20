@@ -17,14 +17,14 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 # One-command deploy (use this)
 ./deploy.sh
 
-# Manual equivalent
-sshpass -p '5409' scp webserver_new.py pi@pi.local:/home/pi/PiInk/src/webserver.py
-sshpass -p '5409' scp main.html pi@pi.local:/home/pi/PiInk/src/templates/main.html
-sshpass -p '5409' ssh pi@pi.local "echo '5409' | sudo -S systemctl restart piink && echo done"
+# Manual equivalent (replace <password> with your Pi's password)
+sshpass -p '<password>' scp webserver_new.py pi@pi.local:/home/pi/PiInk/src/webserver.py
+sshpass -p '<password>' scp main.html pi@pi.local:/home/pi/PiInk/src/templates/main.html
+sshpass -p '<password>' ssh pi@pi.local "echo '<password>' | sudo -S systemctl restart piink && echo done"
 ```
 
-- SSH host: `pi@pi.local` or `192.168.1.50`, password: `5409`
-- Sudo password: same (`echo '5409' | sudo -S`)
+- SSH host: `pi@pi.local` or `192.168.1.50`
+- Sudo password: same as SSH password
 - Service: `piink` (systemd)
 
 ## Stack

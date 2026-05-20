@@ -2,16 +2,17 @@
 
 set -e
 
-PI="pi@192.168.1.50"
-PASS="5409"
+PI_USER="${PI_USER:-pi}"
+PI_PASS="${PI_PASS:-5409}"
+PI="$PI_USER@192.168.1.50"
 PI_HOME="/home/pi/PiInk"
 
-SSH="sshpass -p $PASS ssh -o StrictHostKeyChecking=no $PI"
-SCP="sshpass -p $PASS scp -o StrictHostKeyChecking=no"
+SSH="sshpass -p $PI_PASS ssh -o StrictHostKeyChecking=no $PI"
+SCP="sshpass -p $PI_PASS scp -o StrictHostKeyChecking=no"
 
 echo "=== Waiting for Pi to come online ==="
 
-until sshpass -p "$PASS" ssh \
+until sshpass -p "" ssh \
   -o StrictHostKeyChecking=no \
   -o ConnectTimeout=5 \
   "$PI" "echo ok" 2>/dev/null; do
@@ -25,7 +26,7 @@ echo "Pi is up."
 echo ""
 echo "=== Enable passwordless sudo ==="
 
-$SSH "echo '$PASS' | sudo -S bash -c '
+$SSH "echo '' | sudo -S bash -c '
 echo \"pi ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/pi
 chmod 440 /etc/sudoers.d/pi
 '"
@@ -223,7 +224,7 @@ sudo reboot
 echo "Pi is rebooting (boot config changes require reboot)..."
 echo "Waiting for Pi to come back online..."
 
-until sshpass -p "$PASS" ssh \
+until sshpass -p "" ssh \
   -o StrictHostKeyChecking=no \
   -o ConnectTimeout=5 \
   "$PI" "echo ok" 2>/dev/null; do
