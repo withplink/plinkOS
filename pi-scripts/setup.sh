@@ -7,7 +7,10 @@
 set -e
 
 # Colors
-CORAL='\033[38;2;255;127;80m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+WHITE='\033[1;37m'
 NC='\033[0m'
 
 # Read from terminal
@@ -25,16 +28,19 @@ tty_read() {
   eval "$varname='$val'"
 }
 
-echo -e "${CORAL}"
-echo "▗▄▄▖ ▗▄▖    █       ▗▖   "
-echo "▐▛▀▜▖▝▜▌    ▀       ▐▌   "
-echo "▐▌ ▐▌ ▐▌   ██  ▐▙██▖▐▌▟▛ "
-echo "▐██▛  ▐▌    █  ▐▛ ▐▌▐▙█  "
-echo "▐▌    ▐▌    █  ▐▌ ▐▌▐▛█▖ "
-echo "▐▌    ▐▙▄ ▗▄█▄▖▐▌ ▐▌▐▌▝▙ "
-echo "▝▘     ▀▀ ▝▀▀▀▘▝▘ ▝▘▝▘ ▀▘"
-echo -e "${NC}"
-echo ""
+# Header — stylized e-ink display frame
+print_header() {
+  echo ""
+  echo "${DIM}╭────────────────────────╮${NC}"
+  echo "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}"
+  echo "${DIM}│${NC}  ${CYAN}░${NC}    ${WHITE}Plink${NC}     ${CYAN}░${NC}  ${DIM}│${NC}"
+  echo "${DIM}│${NC}  ${CYAN}░${NC}  e-ink frame ${CYAN}░${NC}  ${DIM}│${NC}"
+  echo "${DIM}│${NC}  ${CYAN}░░░░░░░░░░░░░░░░░░░░${NC}  ${DIM}│${NC}"
+  echo "${DIM}╰────────────────────────╯${NC}"
+  echo ""
+}
+
+print_header
 
 # Check sshpass
 if ! command -v sshpass &> /dev/null; then
