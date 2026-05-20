@@ -36,7 +36,7 @@ echo "Pi is up."
 echo ""
 echo "=== Enable passwordless sudo ==="
 
-$SSH "echo '' | sudo -S bash -c '
+$SSH "echo '$PI_PASS' | sudo -S bash -c '
 echo \"pi ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/pi
 chmod 440 /etc/sudoers.d/pi
 '"
