@@ -210,6 +210,8 @@ if [ "${SETUP_TAILSCALE:-n}" = "y" ] || [ "${SETUP_TAILSCALE:-n}" = "Y" ]; then
         break
       else
         printf "\r  ${RED}✗${NC} Auth key rejected                \n\n"
+        printf "  ${DIM}Auth keys expire after 90 days — generate a new one at:${NC}\n"
+        printf "  ${DIM}https://login.tailscale.com/admin/settings/keys${NC}\n\n"
         printf "  Enter a new Tailscale auth key (or press Enter to skip Tailscale):\n"
         tty_read "  Auth key: " TAILSCALE_AUTH_KEY 1
         if [ -z "$TAILSCALE_AUTH_KEY" ]; then
