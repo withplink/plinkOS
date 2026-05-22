@@ -108,6 +108,8 @@ prompt_pi_creds() {
     PI_USER="${PI_USER:-pi}"
     tty_read "  Password: " PI_PASS 1
     [ -z "$PI_PASS" ] && { echo "Error: password required."; exit 1; }
+  else
+    printf "  ${DIM}Connecting to %s@%s${NC}\n" "$PI_USER" "$PI_HOST"
   fi
   export PI_USER PI_HOST PI_PASS
 }
