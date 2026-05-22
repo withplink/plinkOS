@@ -120,7 +120,7 @@ step "Enable passwordless sudo" \
   $SSH "echo '$PI_PASS' | sudo -S bash -c 'echo \"pi ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/pi && chmod 440 /etc/sudoers.d/pi'"
 
 step "Configure networking" \
-  $SSH "sudo bash -c 'CON=\$(nmcli -t -f NAME connection show --active | grep wlan | head -1) && nmcli connection modify \"\$CON\" ipv4.addresses 192.168.1.50/24 ipv4.gateway 192.168.1.1 ipv4.dns \"8.8.8.8 1.1.1.1\" ipv4.method manual ipv6.method link-local'"
+  $SSH "sudo bash -c 'CON=\$(nmcli -t -f NAME connection show --active | grep wlan | head -1); [ -n \"\$CON\" ] && nmcli connection modify \"\$CON\" ipv4.addresses 192.168.1.50/24 ipv4.gateway 192.168.1.1 ipv4.dns \"8.8.8.8 1.1.1.1\" ipv4.method manual ipv6.method link-local || echo \"No active wlan connection — skipping static IP\"'"
 
 step "Disable WiFi power save" \
   $SSH "sudo bash -c 'mkdir -p /etc/NetworkManager/conf.d && echo -e \"[connection]\nwifi.powersave=2\" > /etc/NetworkManager/conf.d/wifi-powersave.conf && systemctl restart NetworkManager'"
@@ -135,15 +135,15 @@ step "Install Python dependencies" \
   $SSH "sudo pip3 install --break-system-packages flask pillow 'inky[rpi,fonts]' 'qrcode[pil]' 2>/dev/null"
 
 step "Patch display drivers" \
-  $SCP pi-scripts/patch_inky.py "$PI:/tmp/patch_inky.py" && \
+  $SCP "$SCRIPT_DIR/patch_inky.py" "$PI:/tmp/patch_inky.py" && \
   $SSH "sudo python3 /tmp/patch_inky.py"
 
 step "Install system packages" \
   $SSH "sudo apt-get update -qq && sudo apt-get install -y dnsmasq hostapd avahi-daemon -qq 2>/dev/null"
 
 step "Deploy webserver and frontend" \
-  $SCP webserver_new.py "$PI:$PI_HOME/src/webserver.py" && \
-  $SCP main.html "$PI:$PI_HOME/src/templates/main.html"
+  $SCP "$SCRIPT_DIR/../webserver_new.py" "$PI:$PI_HOME/src/webserver.py" && \
+  $SCP "$SCRIPT_DIR/../main.html" "$PI:$PI_HOME/src/templates/main.html"
 
 # ── Phase 4: Configure ──
 section "4/5" "Configuring services"
@@ -152,17 +152,17 @@ step "Enable SPI bus" \
   $SSH "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\""
 
 step "Install helper scripts" \
-  $SCP pi-scripts/scripts/toggle_hotspot.sh "$PI:$PI_HOME/scripts/toggle_hotspot.sh" && \
-  $SCP pi-scripts/scripts/show_hotspot_screen.py "$PI:$PI_HOME/scripts/show_hotspot_screen.py" && \
-  $SCP pi-scripts/scripts/check_wifi_boot.sh "$PI:$PI_HOME/scripts/check_wifi_boot.sh" && \
-  $SCP pi-scripts/button_listener.py "$PI:$PI_HOME/src/button_listener.py" && \
+  $SCP "$SCRIPT_DIR/scripts/toggle_hotspot.sh" "$PI:$PI_HOME/scripts/toggle_hotspot.sh" && \
+  $SCP "$SCRIPT_DIR/scripts/show_hotspot_screen.py" "$PI:$PI_HOME/scripts/show_hotspot_screen.py" && \
+  $SCP "$SCRIPT_DIR/scripts/check_wifi_boot.sh" "$PI:$PI_HOME/scripts/check_wifi_boot.sh" && \
+  $SCP "$SCRIPT_DIR/button_listener.py" "$PI:$PI_HOME/src/button_listener.py" && \
   $SSH "chmod +x $PI_HOME/scripts/toggle_hotspot.sh $PI_HOME/scripts/check_wifi_boot.sh"
 
 step "Configure services" \
-  $SCP pi-scripts/dnsmasq.conf "$PI:/tmp/dnsmasq.conf" && \
-  $SCP pi-scripts/plink-buttons.service "$PI:/tmp/plink-buttons.service" && \
-  $SCP pi-scripts/plink-boot-check.service "$PI:/tmp/plink-boot-check.service" && \
-  $SCP pi-scripts/plink.avahi.service "$PI:/tmp/plink.avahi.service" && \
+  $SCP "$SCRIPT_DIR/dnsmasq.conf" "$PI:/tmp/dnsmasq.conf" && \
+  $SCP "$SCRIPT_DIR/plink-buttons.service" "$PI:/tmp/plink-buttons.service" && \
+  $SCP "$SCRIPT_DIR/plink-boot-check.service" "$PI:/tmp/plink-boot-check.service" && \
+  $SCP "$SCRIPT_DIR/plink.avahi.service" "$PI:/tmp/plink.avahi.service" && \
   $SSH "sudo bash -c '
     cp /tmp/dnsmasq.conf /etc/dnsmasq.conf
     cp /tmp/plink-buttons.service /etc/systemd/system/plink-buttons.service
