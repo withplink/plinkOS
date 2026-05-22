@@ -65,7 +65,7 @@ step() {
   shift
   if [ "$VERBOSE" -eq 1 ]; then
     printf "  ${DIM}→${NC} %s\n" "$label"
-    eval "$@" 2>&1
+    "$@" 2>&1
   else
     local i=0
     while true; do
@@ -75,7 +75,7 @@ step() {
       if kill -0 $! 2>/dev/null; then true; else break; fi
     done &
     local pid=$!
-    if eval "$@" >>"$LOG_FILE" 2>&1; then
+    if "$@" >>"$LOG_FILE" 2>&1; then
       kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       printf "\r  ${GREEN}✓${NC} %s\n" "$label"
@@ -123,7 +123,7 @@ step "Configure networking" \
   $SSH "sudo bash -c 'CON=\$(nmcli -t -f NAME connection show --active | grep wlan | head -1); [ -n \"\$CON\" ] && nmcli connection modify \"\$CON\" ipv4.addresses 192.168.1.50/24 ipv4.gateway 192.168.1.1 ipv4.dns \"8.8.8.8 1.1.1.1\" ipv4.method manual ipv6.method link-local || echo \"No active wlan connection — skipping static IP\"'"
 
 step "Disable WiFi power save" \
-  $SSH "sudo bash -c 'mkdir -p /etc/NetworkManager/conf.d && echo -e \"[connection]\nwifi.powersave=2\" > /etc/NetworkManager/conf.d/wifi-powersave.conf && systemctl restart NetworkManager'"
+  $SSH "sudo bash -c 'mkdir -p /etc/NetworkManager/conf.d && printf \"[connection]\nwifi.powersave=2\n\" > /etc/NetworkManager/conf.d/wifi-powersave.conf'"
 
 # ── Phase 3: Install ──
 section "3/5" "Installing Plink"
@@ -134,16 +134,22 @@ step "Create directories" \
 step "Install Python dependencies" \
   $SSH "sudo pip3 install --break-system-packages flask pillow 'inky[rpi,fonts]' 'qrcode[pil]' 2>/dev/null"
 
-step "Patch display drivers" \
+_step_patch_drivers() {
   $SCP "$SCRIPT_DIR/patch_inky.py" "$PI:/tmp/patch_inky.py" && \
   $SSH "sudo python3 /tmp/patch_inky.py"
+}
+
+step "Patch display drivers" _step_patch_drivers
 
 step "Install system packages" \
   $SSH "sudo apt-get update -qq && sudo apt-get install -y dnsmasq hostapd avahi-daemon -qq 2>/dev/null"
 
-step "Deploy webserver and frontend" \
+_step_deploy() {
   $SCP "$SCRIPT_DIR/../webserver_new.py" "$PI:$PI_HOME/src/webserver.py" && \
   $SCP "$SCRIPT_DIR/../main.html" "$PI:$PI_HOME/src/templates/main.html"
+}
+
+step "Deploy webserver and frontend" _step_deploy
 
 # ── Phase 4: Configure ──
 section "4/5" "Configuring services"
@@ -151,14 +157,17 @@ section "4/5" "Configuring services"
 step "Enable SPI bus" \
   $SSH "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\""
 
-step "Install helper scripts" \
+_step_install_scripts() {
   $SCP "$SCRIPT_DIR/scripts/toggle_hotspot.sh" "$PI:$PI_HOME/scripts/toggle_hotspot.sh" && \
   $SCP "$SCRIPT_DIR/scripts/show_hotspot_screen.py" "$PI:$PI_HOME/scripts/show_hotspot_screen.py" && \
   $SCP "$SCRIPT_DIR/scripts/check_wifi_boot.sh" "$PI:$PI_HOME/scripts/check_wifi_boot.sh" && \
   $SCP "$SCRIPT_DIR/button_listener.py" "$PI:$PI_HOME/src/button_listener.py" && \
   $SSH "chmod +x $PI_HOME/scripts/toggle_hotspot.sh $PI_HOME/scripts/check_wifi_boot.sh"
+}
 
-step "Configure services" \
+step "Install helper scripts" _step_install_scripts
+
+_step_configure_services() {
   $SCP "$SCRIPT_DIR/dnsmasq.conf" "$PI:/tmp/dnsmasq.conf" && \
   $SCP "$SCRIPT_DIR/plink-buttons.service" "$PI:/tmp/plink-buttons.service" && \
   $SCP "$SCRIPT_DIR/plink-boot-check.service" "$PI:/tmp/plink-boot-check.service" && \
@@ -192,66 +201,12 @@ SERVICE
     systemctl unmask hostapd 2>/dev/null || true
     systemctl restart avahi-daemon
   '"
+}
 
-# ── Phase 5: Tailscale (optional) ──
-if [ "${SETUP_TAILSCALE:-n}" = "y" ] || [ "${SETUP_TAILSCALE:-n}" = "Y" ]; then
-  section "5/6" "Installing Tailscale"
+step "Configure services" _step_configure_services
 
-  step "Install Tailscale" \
-    $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
-
-  if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
-    while true; do
-      printf "  ${YELLOW}⋯${NC} Connecting to Tailscale"
-      if $SSH "sudo tailscale up --auth-key='$TAILSCALE_AUTH_KEY' --accept-routes" >>"$LOG_FILE" 2>&1; then
-        printf "\r  ${GREEN}✓${NC} Connected to Tailscale          \n"
-        TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
-        [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
-        break
-      else
-        printf "\r  ${RED}✗${NC} Auth key rejected                \n\n"
-        printf "  ${DIM}Auth keys expire after 90 days — generate a new one at:${NC}\n"
-        printf "  ${DIM}https://login.tailscale.com/admin/settings/keys${NC}\n\n"
-        printf "  Enter a new Tailscale auth key (or press Enter to skip Tailscale):\n"
-        tty_read "  Auth key: " TAILSCALE_AUTH_KEY 1
-        if [ -z "$TAILSCALE_AUTH_KEY" ]; then
-          printf "  ${DIM}Skipping Tailscale.${NC}\n"
-          TAILSCALE_PHASE_DONE=0
-          break
-        fi
-      fi
-    done
-  else
-    # Run tailscale up in background, capture auth URL
-    $SSH "nohup sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &" >>"$LOG_FILE" 2>&1 || true
-    sleep 4
-    AUTH_URL=$($SSH "grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/tailscale-auth.log" 2>/dev/null | head -1 || true)
-    if [ -n "$AUTH_URL" ]; then
-      echo ""
-      printf "  ${YELLOW}${BOLD}Authenticate Tailscale:${NC}\n"
-      printf "  Open in your browser:\n\n"
-      printf "    ${CYAN}${BOLD}%s${NC}\n\n" "$AUTH_URL"
-      printf "  ${DIM}Waiting for authentication${NC}"
-      until $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; do
-        printf "."
-        sleep 3
-      done
-      printf "\r  ${GREEN}✓${NC} Tailscale authenticated                  \n"
-      TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
-      [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
-    else
-      warn "Could not get Tailscale auth URL — run 'sudo tailscale up' manually on the Pi"
-    fi
-  fi
-  TAILSCALE_PHASE_DONE=1
-fi
-
-# ── Phase 6 / 5: Finalize ──
-if [ "${TAILSCALE_PHASE_DONE:-0}" = "1" ]; then
-  section "6/6" "Finalizing setup"
-else
-  section "5/5" "Finalizing setup"
-fi
+# ── Phase 5: Finalize ──
+section "5/5" "Finalizing setup"
 
 divider
 echo ""
@@ -280,6 +235,42 @@ step "Start frame server" \
 step "Verify display" \
   $SSH "sudo systemctl is-active piink | grep -q active"
 
+# ── Tailscale (optional) ──
+echo ""
+printf "  Set up Tailscale for remote access from anywhere? [y/N] "
+tty_read "" _SETUP_TS 0
+TS_IP=""
+if [ "${_SETUP_TS:-n}" = "y" ] || [ "${_SETUP_TS:-n}" = "Y" ]; then
+  echo ""
+  if $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; then
+    printf "  ${GREEN}✓${NC} Tailscale already connected\n"
+    TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
+    [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
+  else
+    step "Install Tailscale" \
+      $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh 2>&1"
+    $SSH "nohup sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &" >>"$LOG_FILE" 2>&1 || true
+    sleep 4
+    AUTH_URL=$($SSH "grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/tailscale-auth.log 2>/dev/null | head -1" 2>/dev/null || true)
+    if [ -n "$AUTH_URL" ]; then
+      echo ""
+      printf "  ${YELLOW}${BOLD}Authenticate Tailscale:${NC}\n"
+      printf "  Open in your browser:\n\n"
+      printf "    ${CYAN}${BOLD}%s${NC}\n\n" "$AUTH_URL"
+      printf "  ${DIM}Waiting for authentication${NC}"
+      until $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; do
+        printf "."
+        sleep 3
+      done
+      printf "\r  ${GREEN}✓${NC} Tailscale authenticated                  \n"
+      TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
+      [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
+    else
+      warn "Could not get Tailscale auth URL — run 'sudo tailscale up' on the Pi to connect manually"
+    fi
+  fi
+fi
+
 echo ""
 divider
 echo ""
@@ -291,12 +282,9 @@ printf "  Open on your phone:\n\n"
 printf "    ${CYAN}${BOLD}http://pi.local${NC}\n\n"
 printf "  ${DIM}Fallback:${NC}\n\n"
 printf "    ${CYAN}http://192.168.1.50${NC}\n\n"
-if [ "${TAILSCALE_PHASE_DONE:-0}" = "1" ]; then
-  TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
-  if [ -n "$TS_IP" ]; then
-    printf "  ${DIM}Tailscale (from anywhere):${NC}\n\n"
-    printf "    ${CYAN}http://%s${NC}\n\n" "$TS_IP"
-  fi
+if [ -n "$TS_IP" ]; then
+  printf "  ${DIM}Tailscale (from anywhere):${NC}\n\n"
+  printf "    ${CYAN}http://%s${NC}\n\n" "$TS_IP"
 fi
 printf "  ${DIM}Upload a photo to your frame.${NC}\n"
 echo ""
@@ -309,6 +297,6 @@ printf "  ${DIM}[C]${NC} Press     Rotate counter-clockwise\n"
 printf "  ${DIM}[D]${NC} Press     Reboot frame\n"
 echo ""
 if [ "$VERBOSE" -eq 0 ]; then
-  printf "  ${DIM}Detailed logs: ssh pi@pi.local 'cat $LOG_FILE'${NC}\n"
+  printf "  ${DIM}Detailed logs: cat %s${NC}\n" "$LOG_FILE"
 fi
 echo ""
