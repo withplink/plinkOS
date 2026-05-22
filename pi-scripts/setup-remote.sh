@@ -248,7 +248,7 @@ if [ "${_SETUP_TS:-n}" = "y" ] || [ "${_SETUP_TS:-n}" = "Y" ]; then
     [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
   else
     step "Install Tailscale" \
-      $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh 2>&1"
+      $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
     $SSH "nohup sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &" >>"$LOG_FILE" 2>&1 || true
     sleep 4
     AUTH_URL=$($SSH "grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/tailscale-auth.log 2>/dev/null | head -1" 2>/dev/null || true)
