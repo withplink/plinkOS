@@ -54,7 +54,7 @@ Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for fir
 **One-line setup (recommended):**
 
 ```bash
-curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/pi-scripts/setup.sh -o setup.sh && bash setup.sh
+curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/plink.sh | bash
 ```
 
 This will prompt for your Pi's password (the one you set during flashing). It connects via `pi.local` (mDNS/Bonjour — works out of the box on macOS/iOS), then handles everything: dependency install, display driver patch, static IP setup, service installation, and reboot. Stale SSH host keys from reflashing are cleared automatically.
@@ -62,7 +62,7 @@ This will prompt for your Pi's password (the one you set during flashing). It co
 Add `--verbose` or `-v` to see full command output instead of the default spinner:
 
 ```bash
-bash setup.sh --verbose
+curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/plink.sh | bash -s -- --verbose
 ```
 
 **Manual setup (alternative):**
@@ -72,7 +72,7 @@ git clone https://github.com/PixeledCode/pi-ink.git
 cd pi-ink
 cp .env.example .env
 # Edit .env — PI_PASS must match the password from step 1
-bash pi-scripts/first-boot-setup.sh
+bash pi-scripts/setup-remote.sh
 ```
 
 The script will:
@@ -97,7 +97,7 @@ The frame is live at `http://pi.local` or `http://192.168.1.50`. Open it on your
 After the initial setup, push code changes with:
 
 ```bash
-./deploy.sh
+./push.sh
 ```
 
 Copies `webserver_new.py` and `main.html` to the Pi and restarts the service.
@@ -107,10 +107,10 @@ Copies `webserver_new.py` and `main.html` to the Pi and restarts the service.
 To clean the Pi back to a pre-install state (removes packages, services, configs):
 
 ```bash
-bash pi-scripts/clean-pi.sh
+bash pi-scripts/reset.sh
 ```
 
-Add `--verbose` or `-v` to see full command output instead of the default spinner. Then re-run `setup.sh` for a fresh install.
+Add `--verbose` or `-v` to see full command output instead of the default spinner. Then re-run `plink.sh` for a fresh install.
 
 ## Display Driver Notes
 
@@ -134,7 +134,7 @@ The `pi-scripts/patch_inky.py` script patches the installed Inky library (v2.x) 
 2. Not request the CS pin via gpiod (spidev owns it)
 3. Not manually toggle CS in `_spi_write` (spidev handles it)
 
-This runs automatically during `first-boot-setup.sh`.
+This runs automatically during `setup-remote.sh`.
 
 ## Design
 

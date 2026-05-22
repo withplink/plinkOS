@@ -1,6 +1,6 @@
 #!/bin/bash
-# Clean Pi to fresh state — removes all Plink files, services, packages, and config changes
-# Usage: bash pi-scripts/clean-pi.sh [--verbose]
+# Reset Pi to pre-install state — removes all Plink files, services, packages, and config changes
+# Usage: bash pi-scripts/reset.sh [--verbose]
 
 set -e
 
@@ -106,6 +106,9 @@ step "Remove Python packages" \
 
 step "Remove system packages" \
   $SSH "echo '$PI_PASS' | sudo -S apt-get remove -y dnsmasq hostapd -qq 2>/dev/null || true"
+
+step "Remove Tailscale" \
+  $SSH "echo '$PI_PASS' | sudo -S bash -c 'tailscale down 2>/dev/null || true; systemctl stop tailscaled 2>/dev/null || true; systemctl disable tailscaled 2>/dev/null || true; apt-get remove -y tailscale -qq 2>/dev/null || true; rm -f /etc/apt/sources.list.d/tailscale.list'"
 
 step "Reset network to DHCP" \
   $SSH "echo '$PI_PASS' | sudo -S bash -c 'CON=\$(nmcli -t -f NAME connection show --active | grep wlan | head -1) && [ -n \"\$CON\" ] && nmcli connection modify \"\$CON\" ipv4.method auto ipv6.method auto'"

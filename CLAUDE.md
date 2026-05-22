@@ -9,10 +9,10 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 - `webserver_new.py` → deployed to `/home/pi/PiInk/src/webserver.py` (Flask backend)
 - `main.html` → deployed to `/home/pi/PiInk/src/templates/main.html` (React frontend, single file)
 - `pi-scripts/patch_inky.py` → patches Inky library v2.x for GPIO/SPI compatibility (runs during install)
-- `pi-scripts/install.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
-- `pi-scripts/first-boot-setup.sh` → remote setup (called by `setup.sh`, has spinner UI)
-- `pi-scripts/clean-pi.sh` → resets Pi to pre-install state
-- `pi-scripts/setup.sh` → one-line entry point (curl | bash compatible)
+- `pi-scripts/setup-local.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
+- `pi-scripts/setup-remote.sh` → remote setup over SSH (called by `plink.sh`, has spinner UI)
+- `pi-scripts/reset.sh` → resets Pi to pre-install state
+- `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Reset/Push menu)
 
 ### Setup Script UX
 
@@ -24,7 +24,7 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 
 ```bash
 # One-command deploy (use this)
-./deploy.sh
+./push.sh
 
 # Manual equivalent (replace <password> with your Pi's password)
 sshpass -p '<password>' scp webserver_new.py pi@pi.local:/home/pi/PiInk/src/webserver.py
@@ -134,7 +134,7 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 | SSH banner text repeats on every remote command | SSH allocates pseudo-terminal by default | Add `-T` flag to SSH commands |
 | `PermissionError` on `patch_inky.py` | Patch writes to `/usr/local/lib/python3.*/dist-packages/` (root-owned) | Run `sudo python3 patch_inky.py` |
 | `curl \| bash` breaks `read` prompts | stdin is the script content, not keyboard | Use `read < /dev/tty` or plain `read` (script runs in interactive shell) |
-| `deploy.sh` fails with `cp: cannot stat '../webserver_new.py'` | `install.sh` runs from `/tmp/plink-scripts/` — `../` doesn't point to repo root | `deploy.sh` handles webserver/frontend copy; `install.sh` skips it when run from `/tmp` |
+| `push.sh` fails with `cp: cannot stat '../webserver_new.py'` | `setup-local.sh` runs from `/tmp/plink-scripts/` — `../` doesn't point to repo root | `push.sh` handles webserver/frontend copy; `setup-local.sh` skips it when run from `/tmp` |
 
 ## Known Issues & Solutions (Session Log)
 
@@ -146,8 +146,8 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 4. **`pip3 install` to user site** — Without `sudo`, inky installed to `~/.local/` which systemd can't find. Fixed with `sudo pip3 install --break-system-packages` + `PYTHONPATH` in service.
 5. **Inky patch didn't match E673's `_spi_write`** — E673 uses `xfer3` with try/except, not simple `xfer` loop. Original patch never matched. Fixed with regex that removes ALL `set_value(self.cs_pin, ...)` regardless of context.
 6. **`_send_command` still had CS pin manipulation** — Regex only matched `_spi_write` context. `_send_command` also calls `set_value(self.cs_pin, Value.ACTIVE)`. Fixed with broader regex: `re.sub(r'\s*self\._gpio\.set_value\(self\.cs_pin, Value\.(INACTIVE|ACTIVE)\)\s*\n', '\n', content)`.
-7. **`install.sh` tries to copy `webserver_new.py` from wrong path** — When run from `/tmp/plink-scripts/`, `../webserver_new.py` doesn't exist. Fixed: `install.sh` checks if file exists, skips if not (deploy.sh handles it).
-8. **`patch_inky.py` needs sudo** — Writes to system Python packages directory. Fixed in `install.sh` and `first-boot-setup.sh`.
+7. **`setup-local.sh` tries to copy `webserver_new.py` from wrong path** — When run from `/tmp/plink-scripts/`, `../webserver_new.py` doesn't exist. Fixed: `setup-local.sh` checks if file exists, skips if not (push.sh handles it).
+8. **`patch_inky.py` needs sudo** — Writes to system Python packages directory. Fixed in `setup-local.sh` and `setup-remote.sh`.
 9. **`nmcli connection up` breaks SSH** — Drops WiFi connection mid-setup. Removed — static IP applies after reboot.
 10. **Default orientation** — Changed from portrait to landscape in `webserver_new.py` (`saveSettings("checked","",...)`).
 

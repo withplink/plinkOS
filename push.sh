@@ -1,0 +1,116 @@
+#!/bin/bash
+# Push webserver + frontend to Pi and restart the frame service.
+# Usage: bash push.sh [--verbose]
+
+set -e
+
+VERBOSE=0
+for arg in "$@"; do
+  if [ "$arg" = "--verbose" ] || [ "$arg" = "-v" ]; then
+    VERBOSE=1
+  fi
+done
+
+# Load .env
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
+
+PI_USER="${PI_USER:-pi}"
+PI_HOST="${PI_HOST:-pi.local}"
+if [ -z "${PI_PASS:-}" ]; then
+  echo "Error: PI_PASS not set. Copy .env.example to .env and fill in your Pi password."
+  exit 1
+fi
+
+HOST="$PI_USER@$PI_HOST"
+SSH="sshpass -p $PI_PASS ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $HOST"
+SCP="sshpass -p $PI_PASS scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR"
+LOG_FILE="/tmp/plink-deploy.log"
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+DIM='\033[2m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+SPINNER_CHARS=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+
+section() {
+  echo ""
+  printf "${CYAN}${BOLD}[%s] %s${NC}\n" "$1" "$2"
+  echo ""
+}
+
+step() {
+  local label="$1"
+  shift
+  if [ "$VERBOSE" -eq 1 ]; then
+    printf "  ${DIM}→${NC} %s\n" "$label"
+    eval "$@" 2>&1
+  else
+    local i=0
+    while true; do
+      printf "\r  ${YELLOW}%s${NC} %s" "${SPINNER_CHARS[$((i % ${#SPINNER_CHARS[@]}))]}" "$label"
+      i=$((i + 1))
+      sleep 0.1
+      if kill -0 $! 2>/dev/null; then true; else break; fi
+    done &
+    local pid=$!
+    if eval "$@" >>"$LOG_FILE" 2>&1; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      printf "\r  ${GREEN}✓${NC} %s\n" "$label"
+    else
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      printf "\r  ${RED}✗${NC} %s (run with -v to see logs)\n" "$label"
+      exit 1
+    fi
+  fi
+}
+
+divider() {
+  printf "${DIM}%s${NC}\n" "────────────────────────────────────────"
+}
+
+echo "" > "$LOG_FILE"
+echo ""
+
+# ── Phase 1: Deploy ──
+section "1/2" "Deploying files"
+
+step "Upload webserver" \
+  "$SCP webserver_new.py '$HOST:/home/pi/PiInk/src/webserver.py'"
+
+step "Upload frontend" \
+  "$SCP main.html '$HOST:/home/pi/PiInk/src/templates/main.html'"
+
+# ── Phase 2: Restart ──
+section "2/2" "Restarting frame"
+
+step "Restart piink service" \
+  "$SSH \"echo '$PI_PASS' | sudo -S systemctl restart piink\""
+
+step "Verify frame is running" \
+  "$SSH 'sudo systemctl is-active piink | grep -q active'"
+
+echo ""
+divider
+echo ""
+printf "  ${GREEN}${BOLD}Deploy complete${NC}\n"
+echo ""
+divider
+echo ""
+printf "  ${CYAN}${BOLD}http://%s${NC}\n" "$PI_HOST"
+echo ""
+if [ "$VERBOSE" -eq 0 ]; then
+  printf "  ${DIM}Detailed logs: cat %s${NC}\n" "$LOG_FILE"
+  echo ""
+fi

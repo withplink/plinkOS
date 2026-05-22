@@ -7,3 +7,23 @@
 **Status:** Not investigated.
 
 ---
+
+## [WiFi] Validate WiFi connection logic across all scenarios — no loopholes
+
+**Repro:** Not described. Need to audit how the Pi connects to WiFi in different scenarios (initial setup, AP mode, client mode, network loss, Tailscale, etc.) and ensure there are no edge cases or loopholes.
+
+**Root cause:** Not investigated.
+
+**Status:** Not investigated.
+
+---
+
+## [Tailscale] Add Tailscale installation and proper setup to initial Pi setup
+
+**Repro:** Not described. Tailscale should be installed and configured as part of the initial Pi setup flow.
+
+**Root cause:** Not investigated.
+
+**Status:** Fix implemented, pending test.
+
+---

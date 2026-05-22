@@ -176,7 +176,14 @@ def api_status():
     _, horiz, _ = loadSettings()
     orientation = 'landscape' if horiz == 'checked' else 'portrait'
 
-    ap_mode = os.path.exists('/tmp/plink_ap_mode')
+    try:
+        nm_out = subprocess.check_output(
+            ['nmcli', '-t', '-f', 'NAME', 'con', 'show', '--active'],
+            stderr=subprocess.DEVNULL
+        ).decode()
+        ap_mode = 'plink-ap' in nm_out.splitlines()
+    except Exception:
+        ap_mode = os.path.exists('/tmp/plink_ap_mode')
 
     return app.response_class(
         json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering, 'ap_mode': ap_mode}),
@@ -632,7 +639,14 @@ def api_wifi_connect():
 @app.route('/api/hotspot/status', methods=['GET'])
 def api_hotspot_status():
     import os
-    active = os.path.exists('/tmp/plink_ap_mode')
+    try:
+        nm_out = subprocess.check_output(
+            ['nmcli', '-t', '-f', 'NAME', 'con', 'show', '--active'],
+            stderr=subprocess.DEVNULL
+        ).decode()
+        active = 'plink-ap' in nm_out.splitlines()
+    except Exception:
+        active = os.path.exists('/tmp/plink_ap_mode')
     try:
         import json as _json
         settings_path = '/home/pi/PiInk/config/settings.json'

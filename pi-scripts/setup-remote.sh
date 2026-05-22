@@ -182,8 +182,49 @@ SERVICE
     systemctl restart avahi-daemon
   '"
 
-# ── Phase 5: Finalize ──
-section "5/5" "Finalizing setup"
+# ── Phase 5: Tailscale (optional) ──
+if [ "${SETUP_TAILSCALE:-n}" = "y" ] || [ "${SETUP_TAILSCALE:-n}" = "Y" ]; then
+  section "5/6" "Installing Tailscale"
+
+  step "Install Tailscale" \
+    $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
+
+  if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
+    step "Connect to Tailscale" \
+      $SSH "sudo tailscale up --auth-key='$TAILSCALE_AUTH_KEY' --accept-routes 2>&1"
+    TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
+    [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
+  else
+    # Run tailscale up in background, capture auth URL
+    $SSH "nohup sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &" >>"$LOG_FILE" 2>&1 || true
+    sleep 4
+    AUTH_URL=$($SSH "grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/tailscale-auth.log" 2>/dev/null | head -1 || true)
+    if [ -n "$AUTH_URL" ]; then
+      echo ""
+      printf "  ${YELLOW}${BOLD}Authenticate Tailscale:${NC}\n"
+      printf "  Open in your browser:\n\n"
+      printf "    ${CYAN}${BOLD}%s${NC}\n\n" "$AUTH_URL"
+      printf "  ${DIM}Waiting for authentication${NC}"
+      until $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; do
+        printf "."
+        sleep 3
+      done
+      printf "\r  ${GREEN}✓${NC} Tailscale authenticated                  \n"
+      TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
+      [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
+    else
+      warn "Could not get Tailscale auth URL — run 'sudo tailscale up' manually on the Pi"
+    fi
+  fi
+  TAILSCALE_PHASE_DONE=1
+fi
+
+# ── Phase 6 / 5: Finalize ──
+if [ "${TAILSCALE_PHASE_DONE:-0}" = "1" ]; then
+  section "6/6" "Finalizing setup"
+else
+  section "5/5" "Finalizing setup"
+fi
 
 divider
 echo ""
@@ -223,6 +264,13 @@ printf "  Open on your phone:\n\n"
 printf "    ${CYAN}${BOLD}http://pi.local${NC}\n\n"
 printf "  ${DIM}Fallback:${NC}\n\n"
 printf "    ${CYAN}http://192.168.1.50${NC}\n\n"
+if [ "${TAILSCALE_PHASE_DONE:-0}" = "1" ]; then
+  TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
+  if [ -n "$TS_IP" ]; then
+    printf "  ${DIM}Tailscale (from anywhere):${NC}\n\n"
+    printf "    ${CYAN}http://%s${NC}\n\n" "$TS_IP"
+  fi
+fi
 printf "  ${DIM}Upload a photo to your frame.${NC}\n"
 echo ""
 divider
