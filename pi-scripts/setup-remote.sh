@@ -237,10 +237,26 @@ step "Verify display" \
 
 # ── Tailscale (optional) ──
 echo ""
-printf "  Set up Tailscale for remote access from anywhere? [y/N] "
-tty_read "" _SETUP_TS 0
 TS_IP=""
-if [ "${_SETUP_TS:-n}" = "y" ] || [ "${_SETUP_TS:-n}" = "Y" ]; then
+_SETUP_TS="n"
+_ts_empty=0
+while true; do
+  printf "  Set up Tailscale for remote access from anywhere? [y/N] "
+  tty_read "" _SETUP_TS_RAW 0
+  case "$(echo "${_SETUP_TS_RAW}" | tr '[:upper:]' '[:lower:]')" in
+    y|yes) _SETUP_TS="y"; break ;;
+    n|no)  _SETUP_TS="n"; break ;;
+    "")
+      _ts_empty=$((_ts_empty + 1))
+      if [ $_ts_empty -ge 3 ]; then
+        printf "  ${DIM}Defaulting to no.${NC}\n"
+        break
+      fi
+      ;;
+    *) printf "  ${DIM}Please enter y or n.${NC}\n" ;;
+  esac
+done
+if [ "$_SETUP_TS" = "y" ]; then
   echo ""
   if $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; then
     printf "  ${GREEN}✓${NC} Tailscale already connected\n"
