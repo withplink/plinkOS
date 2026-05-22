@@ -120,7 +120,8 @@ prompt_pi_creds() {
     fi
   fi
 
-  while true; do
+  _cred_attempts=0
+  while [ $_cred_attempts -lt 3 ]; do
     echo "Where should Plink connect?"
     echo ""
     tty_read "  Hostname or IP [${PI_HOST}]: " _host
@@ -131,6 +132,7 @@ prompt_pi_creds() {
     if [ -z "$PI_PASS" ]; then
       echo ""
       printf "  ${RED}Password required.${NC}\n\n"
+      _cred_attempts=$((_cred_attempts + 1))
       continue
     fi
     printf "  ${DIM}Testing connection...${NC}"
@@ -140,8 +142,13 @@ prompt_pi_creds() {
     else
       printf "\r  ${RED}✗${NC} Connection failed — check host, username, and password.\n\n"
       PI_PASS=""
+      _cred_attempts=$((_cred_attempts + 1))
     fi
   done
+  if [ $_cred_attempts -ge 3 ] && [ -z "$PI_PASS" ]; then
+    printf "  ${RED}Too many failed attempts. Exiting.${NC}\n"
+    exit 1
+  fi
 
   export PI_USER PI_HOST PI_PASS
 }
