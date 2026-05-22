@@ -225,7 +225,7 @@ until sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ER
   printf "."
   sleep 5
 done
-printf "\r  ${GREEN}✓${NC} Pi is back online\n"
+printf "\r\033[2K  ${GREEN}✓${NC} Pi is back online\n"
 
 sleep 3
 

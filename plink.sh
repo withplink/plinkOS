@@ -146,23 +146,6 @@ prompt_pi_creds() {
   export PI_USER PI_HOST PI_PASS
 }
 
-prompt_tailscale() {
-  echo ""
-  echo "Optional: Tailscale VPN lets you reach your frame from anywhere."
-  echo ""
-  tty_read "  Set up Tailscale VPN? [y/N]: " SETUP_TAILSCALE
-  SETUP_TAILSCALE="${SETUP_TAILSCALE:-n}"
-  if [ "$SETUP_TAILSCALE" = "y" ] || [ "$SETUP_TAILSCALE" = "Y" ]; then
-    echo ""
-    echo "  Auth key lets setup complete without a browser — get one at:"
-    echo "  https://login.tailscale.com/admin/settings/keys"
-    echo ""
-    tty_read "  Tailscale auth key [skip — use browser]: " TAILSCALE_AUTH_KEY 1
-    export TAILSCALE_AUTH_KEY
-  fi
-  export SETUP_TAILSCALE
-}
-
 do_install() {
   if is_pi; then
     # ── On Pi ──
@@ -176,7 +159,6 @@ do_install() {
     ensure_sshpass
     if ! in_repo; then
       prompt_pi_creds
-      prompt_tailscale
       ssh-keygen -R "$PI_HOST" >/dev/null 2>&1 || true
       ssh-keygen -R "pi.local" >/dev/null 2>&1 || true
       echo ""
@@ -184,7 +166,6 @@ do_install() {
       printf 'PI_USER=%s\nPI_HOST=%s\nPI_PASS=%s\n' "$PI_USER" "$PI_HOST" "$PI_PASS" > "$SCRIPT_DIR/.env"
     else
       prompt_pi_creds
-      prompt_tailscale
       ssh-keygen -R "$PI_HOST" >/dev/null 2>&1 || true
     fi
     bash "$SCRIPT_DIR/pi-scripts/setup-remote.sh" "$@"
