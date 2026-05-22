@@ -155,7 +155,7 @@ step "Deploy webserver and frontend" _step_deploy
 section "4/5" "Configuring services"
 
 step "Enable SPI bus" \
-  $SSH "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\""
+  $SSH "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && sudo sed -i '/dtoverlay=spi0-0cs/d' /boot/firmware/config.txt"
 
 _step_install_scripts() {
   $SCP "$SCRIPT_DIR/scripts/toggle_hotspot.sh" "$PI:$PI_HOME/scripts/toggle_hotspot.sh" && \
@@ -239,23 +239,27 @@ step "Verify display" \
 echo ""
 TS_IP=""
 _SETUP_TS="n"
-_ts_empty=0
-while true; do
-  printf "  Set up Tailscale for remote access from anywhere? [y/N] "
-  tty_read "" _SETUP_TS_RAW 0
-  case "$(echo "${_SETUP_TS_RAW}" | tr '[:upper:]' '[:lower:]')" in
-    y|yes) _SETUP_TS="y"; break ;;
-    n|no)  _SETUP_TS="n"; break ;;
-    "")
-      _ts_empty=$((_ts_empty + 1))
-      if [ $_ts_empty -ge 3 ]; then
-        printf "  ${DIM}Defaulting to no.${NC}\n"
-        break
-      fi
-      ;;
-    *) printf "  ${DIM}Please enter y or n.${NC}\n" ;;
-  esac
-done
+if [ -c /dev/tty ]; then
+  _ts_empty=0
+  while true; do
+    printf "  Set up Tailscale for remote access from anywhere? [y/N] "
+    tty_read "" _SETUP_TS_RAW 0
+    case "$(echo "${_SETUP_TS_RAW}" | tr '[:upper:]' '[:lower:]')" in
+      y|yes) _SETUP_TS="y"; break ;;
+      n|no)  _SETUP_TS="n"; break ;;
+      "")
+        _ts_empty=$((_ts_empty + 1))
+        if [ $_ts_empty -ge 3 ]; then
+          printf "  ${DIM}Defaulting to no.${NC}\n"
+          break
+        fi
+        ;;
+      *) printf "  ${DIM}Please enter y or n.${NC}\n" ;;
+    esac
+  done
+else
+  printf "  ${DIM}No TTY available — skipping Tailscale setup.${NC}\n"
+fi
 if [ "$_SETUP_TS" = "y" ]; then
   echo ""
   if $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; then
