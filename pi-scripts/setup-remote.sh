@@ -42,6 +42,17 @@ BOLD='\033[1m'
 
 SPINNER_CHARS=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 
+tty_read() {
+  local prompt="$1" varname="$2" hidden="$3" val=""
+  if [ "$hidden" = "1" ]; then
+    read -s -p "$prompt" val < /dev/tty
+  else
+    read -p "$prompt" val < /dev/tty
+  fi
+  echo ""
+  eval "$varname='$val'"
+}
+
 # Helpers
 section() {
   echo ""
@@ -190,10 +201,24 @@ if [ "${SETUP_TAILSCALE:-n}" = "y" ] || [ "${SETUP_TAILSCALE:-n}" = "Y" ]; then
     $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
 
   if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
-    step "Connect to Tailscale" \
-      $SSH "sudo tailscale up --auth-key='$TAILSCALE_AUTH_KEY' --accept-routes 2>&1"
-    TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
-    [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
+    while true; do
+      printf "  ${YELLOW}⋯${NC} Connecting to Tailscale"
+      if $SSH "sudo tailscale up --auth-key='$TAILSCALE_AUTH_KEY' --accept-routes" >>"$LOG_FILE" 2>&1; then
+        printf "\r  ${GREEN}✓${NC} Connected to Tailscale          \n"
+        TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
+        [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
+        break
+      else
+        printf "\r  ${RED}✗${NC} Auth key rejected                \n\n"
+        printf "  Enter a new Tailscale auth key (or press Enter to skip Tailscale):\n"
+        tty_read "  Auth key: " TAILSCALE_AUTH_KEY 1
+        if [ -z "$TAILSCALE_AUTH_KEY" ]; then
+          printf "  ${DIM}Skipping Tailscale.${NC}\n"
+          TAILSCALE_PHASE_DONE=0
+          break
+        fi
+      fi
+    done
   else
     # Run tailscale up in background, capture auth URL
     $SSH "nohup sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &" >>"$LOG_FILE" 2>&1 || true

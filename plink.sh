@@ -95,22 +95,54 @@ ensure_sshpass() {
   fi
 }
 
+test_ssh() {
+  sshpass -p "$PI_PASS" ssh -T -q \
+    -o StrictHostKeyChecking=no \
+    -o LogLevel=ERROR \
+    -o ConnectTimeout=5 \
+    "$PI_USER@$PI_HOST" echo ok >/dev/null 2>&1
+}
+
 prompt_pi_creds() {
   load_env
   PI_USER="${PI_USER:-pi}"
   PI_HOST="${PI_HOST:-pi.local}"
-  if [ -z "${PI_PASS:-}" ]; then
+
+  if [ -n "${PI_PASS:-}" ]; then
+    printf "  ${DIM}Trying saved credentials (%s@%s)...${NC}" "$PI_USER" "$PI_HOST"
+    if test_ssh; then
+      printf "\r  ${GREEN}✓${NC} Connected to %s@%s              \n" "$PI_USER" "$PI_HOST"
+      export PI_USER PI_HOST PI_PASS
+      return
+    else
+      printf "\r  ${RED}✗${NC} Saved credentials failed (%s@%s)\n\n" "$PI_USER" "$PI_HOST"
+      PI_PASS=""
+    fi
+  fi
+
+  while true; do
     echo "Where should Plink connect?"
     echo ""
-    tty_read "  Hostname or IP [pi.local]: " PI_HOST
-    PI_HOST="${PI_HOST:-pi.local}"
-    tty_read "  Username [pi]: " PI_USER
-    PI_USER="${PI_USER:-pi}"
+    tty_read "  Hostname or IP [${PI_HOST}]: " _host
+    PI_HOST="${_host:-$PI_HOST}"
+    tty_read "  Username [${PI_USER}]: " _user
+    PI_USER="${_user:-$PI_USER}"
     tty_read "  Password: " PI_PASS 1
-    [ -z "$PI_PASS" ] && { echo "Error: password required."; exit 1; }
-  else
-    printf "  ${DIM}Connecting to %s@%s${NC}\n" "$PI_USER" "$PI_HOST"
-  fi
+    if [ -z "$PI_PASS" ]; then
+      echo ""
+      printf "  ${RED}Password required.${NC}\n\n"
+      continue
+    fi
+    printf "  ${DIM}Testing connection...${NC}"
+    if test_ssh; then
+      printf "\r  ${GREEN}✓${NC} Connected                    \n"
+      break
+    else
+      printf "\r  ${RED}✗${NC} Connection failed — check host, username, and password.\n\n"
+      PI_PASS=""
+    fi
+  done
+
   export PI_USER PI_HOST PI_PASS
 }
 
@@ -165,6 +197,7 @@ do_reset() {
     echo "Error: run from repo root."
     exit 1
   fi
+  ensure_sshpass
   prompt_pi_creds
   bash "$SCRIPT_DIR/pi-scripts/reset.sh" "$@"
 }
@@ -174,6 +207,7 @@ do_push() {
     echo "Error: run from repo root."
     exit 1
   fi
+  ensure_sshpass
   prompt_pi_creds
   bash "$SCRIPT_DIR/push.sh" "$@"
 }
