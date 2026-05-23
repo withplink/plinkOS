@@ -53,7 +53,7 @@
 
 **Root cause:** Terminal-based flow has no feedback loop for device name resolution.
 
-**Status:** Fix implemented, pending test.
+**Status:** Fixed.
 
 ---
 
