@@ -1,5 +1,24 @@
 # Plink — Claude Context
 
+## Multi-repo setup
+
+Plink is a two-repo project. Both repos are always in scope regardless of which one Claude is opened from:
+
+| Repo | Path | Purpose |
+|---|---|---|
+| `pi-ink` (this repo) | `/Users/shoaibahmed/code/personal/pi-ink` | Pi server (Flask), PWA frontend, setup scripts |
+| `Plink` | `/Users/shoaibahmed/code/personal/Plink` | iOS SwiftUI app |
+
+**On every session start**, read all of these before doing anything:
+- `/Users/shoaibahmed/code/personal/pi-ink/HANDOFF.md`
+- `/Users/shoaibahmed/code/personal/pi-ink/CLAUDE.md`
+- `/Users/shoaibahmed/code/personal/Plink/HANDOFF.md`
+- `/Users/shoaibahmed/code/personal/Plink/CLAUDE.md`
+
+**Cross-repo changes**: if a task requires changes in `Plink` (iOS), make them directly — edit the Swift files as needed. Do not ask the user to switch repos.
+
+**Deploy command** (this repo → Pi): `cd /Users/shoaibahmed/code/personal/pi-ink && bash push.sh`
+
 ## Project
 
 Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impression 7.3" e-ink display. Send photos to the frame from your phone.
@@ -114,6 +133,7 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 | `POST` | `/api/queue/next` | Advance to next item |
 | `POST` | `/api/queue/show` | Jump to item by index |
 | `POST` | `/api/queue/interval` | Set auto-rotate interval in minutes |
+| `POST` | `/api/queue/rename` | Rename item at index: `{index, label}` |
 | `GET` | `/api/hotspot/status` | `{active, ssid, password, ip}` — AP mode state |
 | `GET` | `/api/wifi/networks` | `{known, visible}` — known SSIDs from `wpa_supplicant.conf` + Pi scan results |
 | `POST` | `/api/wifi` | `{ssid, password?}` — write creds, trigger hotspot→client switch after 2s |
