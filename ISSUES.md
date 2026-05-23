@@ -66,3 +66,28 @@
 **Status:** Not investigated.
 
 ---
+
+## [Pi-PowerSaving] Reduce Pi power consumption: CPU governor, HDMI/USB, unused services, push vs polling
+
+**Repro:** Not described. Research and implement power-saving measures:
+- Set CPU governor to powersave/conservative for aggressive idle
+- Permanently disable HDMI output
+- Disable power to non-essential USB ports
+- Disable unused system services (bluetooth, etc.)
+- Replace polling (30s / 8s status interval) with push-based updates (WebSocket or SSE)
+
+**Root cause:** Not investigated.
+
+**Status:** Not investigated.
+
+---
+
+## [ESP32-Controller] ESP32 as always-on controller, Pi only for rendering/image processing
+
+**Repro:** Not described. Explore architecture where an ESP32 handles always-on tasks (WiFi connectivity, button inputs, queue management, AP mode) and wakes the Pi only when rendering/e-ink refresh is needed. Pi stays powered off or in deep sleep most of the time.
+
+**Root cause:** Not investigated.
+
+**Status:** Not investigated.
+
+---
