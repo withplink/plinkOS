@@ -681,11 +681,35 @@ def api_hotspot_status():
 
 @app.route('/api/tailscale/connect', methods=['POST'])
 def api_tailscale_connect():
+    # Ensure tailscaled daemon is running
+    try:
+        r = subprocess.run(['systemctl', 'is-active', 'tailscaled'], capture_output=True, text=True)
+        if r.stdout.strip() != 'active':
+            subprocess.run(['sudo', 'systemctl', 'enable', '--now', 'tailscaled'], capture_output=True, timeout=15)
+            time.sleep(2)
+    except Exception:
+        pass
+
     try:
         r = subprocess.run(['tailscale', 'ip', '-4'], capture_output=True, text=True, timeout=5)
         if r.returncode == 0 and r.stdout.strip():
+            ip = r.stdout.strip()
+            serve_result = subprocess.run(
+                ['sudo', 'tailscale', 'serve', '--bg', '--yes', '80'],
+                capture_output=True, text=True, timeout=10)
+            if serve_result.returncode != 0:
+                print(f"tailscale serve failed: {serve_result.stderr}", flush=True)
+            fqdn = None
+            try:
+                st = subprocess.run(['tailscale', 'status', '--json'],
+                                    capture_output=True, text=True, timeout=5)
+                if st.returncode == 0:
+                    fqdn = json.loads(st.stdout).get('Self', {}).get('DNSName', '').rstrip('.')
+            except Exception:
+                pass
+            url = f'https://{fqdn}' if fqdn else None
             return app.response_class(
-                json.dumps({'ok': True, 'state': 'running', 'ip': r.stdout.strip()}),
+                json.dumps({'ok': True, 'state': 'running', 'ip': ip, 'url': url}),
                 mimetype='application/json'
             )
     except Exception:
@@ -702,7 +726,7 @@ def api_tailscale_connect():
         subprocess.Popen(['sudo', 'tailscale', 'up'], stdout=f, stderr=subprocess.STDOUT)
 
     url_pat = re.compile(r'https://login\.tailscale\.com\S+')
-    deadline = time.time() + 20
+    deadline = time.time() + 45
     while time.time() < deadline:
         try:
             content = open(log_file).read()
@@ -727,8 +751,20 @@ def api_tailscale_status():
     try:
         r = subprocess.run(['tailscale', 'ip', '-4'], capture_output=True, text=True, timeout=5)
         if r.returncode == 0 and r.stdout.strip():
+            ip = r.stdout.strip()
+            subprocess.run(['sudo', 'tailscale', 'serve', '--bg', '--yes', '80'],
+                           capture_output=True, timeout=10)
+            fqdn = None
+            try:
+                st = subprocess.run(['tailscale', 'status', '--json'],
+                                    capture_output=True, text=True, timeout=5)
+                if st.returncode == 0:
+                    fqdn = json.loads(st.stdout).get('Self', {}).get('DNSName', '').rstrip('.')
+            except Exception:
+                pass
+            url = f'https://{fqdn}' if fqdn else None
             return app.response_class(
-                json.dumps({'ok': True, 'state': 'running', 'ip': r.stdout.strip()}),
+                json.dumps({'ok': True, 'state': 'running', 'ip': ip, 'url': url}),
                 mimetype='application/json'
             )
     except Exception:
@@ -971,6 +1007,16 @@ if _gpio_available:
     except Exception as e:
         print(f"GPIO event detection skipped: {e}")
 
+def _ensure_tailscale_serve():
+    try:
+        r = subprocess.run(['tailscale', 'ip', '-4'], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            subprocess.run(['sudo', 'tailscale', 'serve', '--bg', '--yes', '80'],
+                           capture_output=True, timeout=10)
+    except Exception:
+        pass
+
 if __name__ == '__main__':
     app.secret_key = str(random.randint(100000,999999))
+    _ensure_tailscale_serve()
     app.run(host="::", port=80, threaded=True)
