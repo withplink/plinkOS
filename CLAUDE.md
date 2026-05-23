@@ -12,8 +12,10 @@ Plink is a two-repo project. Both repos are always in scope regardless of which 
 **On every session start**, read all of these before doing anything:
 - `/Users/shoaibahmed/code/personal/pi-ink/HANDOFF.md`
 - `/Users/shoaibahmed/code/personal/pi-ink/CLAUDE.md`
+- `/Users/shoaibahmed/code/personal/pi-ink/README.md`
 - `/Users/shoaibahmed/code/personal/Plink/HANDOFF.md`
 - `/Users/shoaibahmed/code/personal/Plink/CLAUDE.md`
+- `/Users/shoaibahmed/code/personal/Plink/README.md`
 
 **Cross-repo changes**: if a task requires changes in `Plink` (iOS), make them directly — edit the Swift files as needed. Do not ask the user to switch repos.
 
