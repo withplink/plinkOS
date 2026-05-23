@@ -1,4 +1,4 @@
-import os,random,time,signal,subprocess,threading
+import os,random,time,signal,subprocess,threading,re
 from flask import Flask, flash, request, redirect, url_for,render_template
 from werkzeug.utils import secure_filename
 from flask import send_from_directory
@@ -553,6 +553,24 @@ def api_queue_interval():
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
 
+@app.route('/api/queue/rename', methods=['POST'])
+def api_queue_rename():
+    q = load_queue()
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        idx = int(data.get('index', -1))
+        label = str(data.get('label', '')).strip()
+        if not label:
+            return app.response_class(json.dumps({'error': 'label required'}), status=400, mimetype='application/json')
+        if idx < 0 or idx >= len(q.get('items', [])):
+            return app.response_class(json.dumps({'error': 'index out of range'}), status=400, mimetype='application/json')
+        q['items'][idx]['label'] = label
+        save_queue(q)
+        return app.response_class(json.dumps({'ok': True, 'queue': q}), mimetype='application/json')
+    except Exception as e:
+        return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
+
+
 @app.route('/api/wifi/networks', methods=['GET'])
 def api_wifi_networks():
     known = []
@@ -659,6 +677,81 @@ def api_hotspot_status():
         json.dumps({'active': active, 'ssid': 'plink-setup', 'password': password, 'ip': '192.168.4.1'}),
         mimetype='application/json'
     )
+
+
+@app.route('/api/tailscale/connect', methods=['POST'])
+def api_tailscale_connect():
+    try:
+        r = subprocess.run(['tailscale', 'ip', '-4'], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            return app.response_class(
+                json.dumps({'ok': True, 'state': 'running', 'ip': r.stdout.strip()}),
+                mimetype='application/json'
+            )
+    except Exception:
+        pass
+
+    subprocess.run(['sudo', 'pkill', '-f', 'tailscale up'], capture_output=True)
+    log_file = '/tmp/tailscale-auth.log'
+    try:
+        os.remove(log_file)
+    except OSError:
+        pass
+
+    with open(log_file, 'w') as f:
+        subprocess.Popen(['sudo', 'tailscale', 'up'], stdout=f, stderr=subprocess.STDOUT)
+
+    url_pat = re.compile(r'https://login\.tailscale\.com\S+')
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        try:
+            content = open(log_file).read()
+            m = url_pat.search(content)
+            if m:
+                return app.response_class(
+                    json.dumps({'ok': True, 'state': 'auth_required', 'auth_url': m.group().rstrip('.')}),
+                    mimetype='application/json'
+                )
+        except OSError:
+            pass
+        time.sleep(0.5)
+
+    return app.response_class(
+        json.dumps({'ok': False, 'error': 'Timed out waiting for auth URL'}),
+        mimetype='application/json'
+    ), 500
+
+
+@app.route('/api/tailscale/status', methods=['GET'])
+def api_tailscale_status():
+    try:
+        r = subprocess.run(['tailscale', 'ip', '-4'], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            return app.response_class(
+                json.dumps({'ok': True, 'state': 'running', 'ip': r.stdout.strip()}),
+                mimetype='application/json'
+            )
+    except Exception:
+        pass
+    return app.response_class(
+        json.dumps({'ok': True, 'state': 'stopped', 'ip': None}),
+        mimetype='application/json'
+    )
+
+
+@app.route('/api/tailscale/disconnect', methods=['POST'])
+def api_tailscale_disconnect():
+    try:
+        subprocess.run(['sudo', 'tailscale', 'logout'], capture_output=True, timeout=10)
+        return app.response_class(
+            json.dumps({'ok': True}),
+            mimetype='application/json'
+        )
+    except Exception as e:
+        return app.response_class(
+            json.dumps({'ok': False, 'error': str(e)}),
+            mimetype='application/json'
+        ), 500
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────

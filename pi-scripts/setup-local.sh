@@ -140,8 +140,7 @@ step "Enable persistent journal" \
    sudo systemctl restart systemd-journald"
 
 step "Enable SPI bus" \
-  "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && \
-   grep -q 'dtoverlay=spi0-0cs' /boot/firmware/config.txt || sudo sh -c \"echo 'dtoverlay=spi0-0cs' >> /boot/firmware/config.txt\""
+  "sudo sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' /boot/firmware/config.txt && sudo sed -i '/dtoverlay=spi0-0cs/d' /boot/firmware/config.txt"
 
 step "Patch Inky display driver" \
   "sudo python3 '$SCRIPT_DIR/patch_inky.py'"
@@ -172,41 +171,9 @@ fi
 step "Start frame server" \
   "sudo systemctl start piink"
 
-# ── Optional: Tailscale ──
-if [ "${SETUP_TAILSCALE:-n}" = "y" ] || [ "${SETUP_TAILSCALE:-n}" = "Y" ]; then
-  echo ""
-  printf "${CYAN}${BOLD}[+] Installing Tailscale${NC}\n"
-  echo ""
-
-  step "Install Tailscale" \
-    "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
-
-  if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
-    step "Connect to Tailscale" \
-      "sudo tailscale up --auth-key='$TAILSCALE_AUTH_KEY' --accept-routes"
-    TS_IP=$(sudo tailscale ip 2>/dev/null | head -1 || true)
-    [ -n "$TS_IP" ] && printf "  ${DIM}Tailscale IP: %s${NC}\n" "$TS_IP"
-  else
-    sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &
-    sleep 4
-    AUTH_URL=$(grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/tailscale-auth.log 2>/dev/null | head -1 || true)
-    if [ -n "$AUTH_URL" ]; then
-      printf "  ${YELLOW}${BOLD}Authenticate Tailscale:${NC}\n"
-      printf "  Open in your browser:\n\n"
-      printf "    ${CYAN}${BOLD}%s${NC}\n\n" "$AUTH_URL"
-      printf "  ${DIM}Waiting for authentication${NC}"
-      until sudo tailscale ip 2>/dev/null | grep -q '100\.'; do
-        printf "."
-        sleep 3
-      done
-      printf "\r  ${GREEN}✓${NC} Tailscale authenticated                  \n"
-      TS_IP=$(sudo tailscale ip 2>/dev/null | head -1 || true)
-      [ -n "$TS_IP" ] && printf "  ${DIM}Tailscale IP: %s${NC}\n" "$TS_IP"
-    else
-      warn "Run 'sudo tailscale up' manually to authenticate."
-    fi
-  fi
-fi
+# ── Install Tailscale (authentication done via Plink app) ──
+step "Install Tailscale" \
+  "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
 
 echo ""
 divider

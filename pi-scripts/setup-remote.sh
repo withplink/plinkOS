@@ -235,61 +235,27 @@ step "Start frame server" \
 step "Verify display" \
   $SSH "sudo systemctl is-active piink | grep -q active"
 
-# ── Tailscale (optional) ──
-echo ""
-TS_IP=""
-_SETUP_TS="n"
-if [ -c /dev/tty ]; then
-  _ts_empty=0
-  while true; do
-    printf "  Set up Tailscale for remote access from anywhere? [y/N] "
-    tty_read "" _SETUP_TS_RAW 0
-    case "$(echo "${_SETUP_TS_RAW}" | tr '[:upper:]' '[:lower:]')" in
-      y|yes) _SETUP_TS="y"; break ;;
-      n|no)  _SETUP_TS="n"; break ;;
-      "")
-        _ts_empty=$((_ts_empty + 1))
-        if [ $_ts_empty -ge 3 ]; then
-          printf "  ${DIM}Defaulting to no.${NC}\n"
-          break
-        fi
-        ;;
-      *) printf "  ${DIM}Please enter y or n.${NC}\n" ;;
-    esac
-  done
-else
-  printf "  ${DIM}No TTY available — skipping Tailscale setup.${NC}\n"
-fi
-if [ "$_SETUP_TS" = "y" ]; then
-  echo ""
-  if $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; then
-    printf "  ${GREEN}✓${NC} Tailscale already connected\n"
-    TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
-    [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
-  else
-    step "Install Tailscale" \
-      $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
-    $SSH "nohup sudo tailscale up > /tmp/tailscale-auth.log 2>&1 &" >>"$LOG_FILE" 2>&1 || true
-    sleep 4
-    AUTH_URL=$($SSH "grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/tailscale-auth.log 2>/dev/null | head -1" 2>/dev/null || true)
-    if [ -n "$AUTH_URL" ]; then
-      echo ""
-      printf "  ${YELLOW}${BOLD}Authenticate Tailscale:${NC}\n"
-      printf "  Open in your browser:\n\n"
-      printf "    ${CYAN}${BOLD}%s${NC}\n\n" "$AUTH_URL"
-      printf "  ${DIM}Waiting for authentication${NC}"
-      until $SSH "sudo tailscale ip 2>/dev/null | grep -q '100\.'" >>"$LOG_FILE" 2>&1; do
-        printf "."
-        sleep 3
-      done
-      printf "\r  ${GREEN}✓${NC} Tailscale authenticated                  \n"
-      TS_IP=$($SSH "sudo tailscale ip 2>/dev/null | head -1" 2>/dev/null || true)
-      [ -n "$TS_IP" ] && info "Tailscale IP: $TS_IP"
-    else
-      warn "Could not get Tailscale auth URL — run 'sudo tailscale up' on the Pi to connect manually"
-    fi
+# ── Default image (optional) ──
+_DEFAULT_IMG=""
+_DEFAULT_EXT=""
+for _ext in jpg jpeg png webp; do
+  if [ -f "$SCRIPT_DIR/default-image.$_ext" ]; then
+    _DEFAULT_IMG="$SCRIPT_DIR/default-image.$_ext"
+    _DEFAULT_EXT="$_ext"
+    break
   fi
+done
+if [ -n "$_DEFAULT_IMG" ]; then
+  _step_default_image() {
+    $SCP "$_DEFAULT_IMG" "$PI:/tmp/default-image.$_DEFAULT_EXT" && \
+    $SSH "curl -sf -X POST -F 'file=@/tmp/default-image.$_DEFAULT_EXT' http://localhost/api/upload > /dev/null && rm -f /tmp/default-image.$_DEFAULT_EXT"
+  }
+  step "Set default image" _step_default_image
 fi
+
+# ── Install Tailscale (authentication done via Plink app) ──
+step "Install Tailscale" \
+  $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"
 
 echo ""
 divider
@@ -302,10 +268,7 @@ printf "  Open on your phone:\n\n"
 printf "    ${CYAN}${BOLD}http://pi.local${NC}\n\n"
 printf "  ${DIM}Fallback:${NC}\n\n"
 printf "    ${CYAN}http://192.168.1.50${NC}\n\n"
-if [ -n "$TS_IP" ]; then
-  printf "  ${DIM}Tailscale (from anywhere):${NC}\n\n"
-  printf "    ${CYAN}http://%s${NC}\n\n" "$TS_IP"
-fi
+
 printf "  ${DIM}Upload a photo to your frame.${NC}\n"
 echo ""
 divider
