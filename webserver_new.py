@@ -1,4 +1,4 @@
-import os,random,time,signal,subprocess,threading,re
+import os,sys,random,time,signal,subprocess,threading,re
 from flask import Flask, flash, request, redirect, url_for,render_template
 from werkzeug.utils import secure_filename
 from flask import send_from_directory
@@ -14,9 +14,11 @@ inky_display = Inky(
 )
 
 from PIL import ImageDraw,Image
-BUTTONS = [6, 16, 24]
+BUTTON_A = 5
+BUTTONS = [BUTTON_A, 6, 16, 24]
 ORIENTATION = 0
 ADJUST_AR = False
+_button_a_press_time = None
 
 try:
     GPIO.setmode(GPIO.BCM)
@@ -57,20 +59,56 @@ def add_cors(response):
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return response
 
-def handleButton(pin):
-    if(pin == 6):
+def _trigger_hotspot_toggle():
+    """Toggle AP mode. toggle_hotspot.sh handles screen rendering for both directions."""
+    print("--A-- Long press: toggling hotspot mode")
+    subprocess.Popen(
+        ['/home/pi/PiInk/scripts/toggle_hotspot.sh'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+
+
+def handleButtonPress(pin):
+    global _button_a_press_time
+    if pin == BUTTON_A:
+        _button_a_press_time = time.time()
+        return
+
+    if pin == 6:
         print("--B-- Pressed: Rotate image clockwise")
         rotateImage(-90)
-    elif(pin == 16):
+    elif pin == 16:
         print("--C-- Pressed: Rotate image counter clockwise")
         rotateImage(90)
-    elif(pin == 24):
+    elif pin == 24:
         print("--D-- Pressed: Reboot the Pi")
         subprocess.Popen(['sudo', 'reboot'], start_new_session=True)
+
+
+def handleButtonRelease(pin):
+    global _button_a_press_time
+    if pin == BUTTON_A and _button_a_press_time is not None:
+        elapsed = time.time() - _button_a_press_time
+        _button_a_press_time = None
+        if elapsed >= 1.5:
+            threading.Thread(target=_trigger_hotspot_toggle, daemon=True).start()
+
+
+def handleButton(pin):
+    handleButtonPress(pin)
 
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def compress_image(filepath, max_size=(1600, 960), quality=90):
+    try:
+        img = Image.open(filepath).convert('RGB')
+        img.thumbnail(max_size, Image.LANCZOS)
+        img.save(filepath, 'JPEG', quality=quality)
+    except Exception as e:
+        print(f"compress_image error: {e}")
 
 # ── Legacy route (kept for curl/backward compat) ─────────────────────────────
 @app.route('/', methods=['GET', 'POST'])
@@ -353,7 +391,9 @@ def api_queue_add():
                 return app.response_class(json.dumps({'error': 'Unsupported file type'}), status=400, mimetype='application/json')
             ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
             filename = ts + secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            compress_image(filepath)
         else:
             return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
 
@@ -363,7 +403,9 @@ def api_queue_add():
             if allowed_file(orig_file.filename):
                 orig_ts = datetime.now().strftime('%Y%m%d_%H%M%S_orig_')
                 orig_filename = orig_ts + secure_filename(orig_file.filename)
-                orig_file.save(os.path.join(app.config['UPLOAD_FOLDER'], orig_filename))
+                orig_filepath = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
+                orig_file.save(orig_filepath)
+                compress_image(orig_filepath)
 
         show_now = request.form.get('show_now') == '1'
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
@@ -471,7 +513,9 @@ def api_queue_replace():
             return app.response_class(json.dumps({'error': 'Unsupported file type'}), status=400, mimetype='application/json')
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
         filename = ts + secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        compress_image(filepath)
 
         orig_filename = None
         if 'original' in request.files and request.files['original'].filename:
@@ -479,7 +523,9 @@ def api_queue_replace():
             if allowed_file(orig_file.filename):
                 orig_ts = datetime.now().strftime('%Y%m%d_%H%M%S_orig_')
                 orig_filename = orig_ts + secure_filename(orig_file.filename)
-                orig_file.save(os.path.join(app.config['UPLOAD_FOLDER'], orig_filename))
+                orig_filepath = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
+                orig_file.save(orig_filepath)
+                compress_image(orig_filepath)
 
         # Delete old files
         old_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_item["filename"])
@@ -571,31 +617,57 @@ def api_queue_rename():
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
 
-@app.route('/api/wifi/networks', methods=['GET'])
-def api_wifi_networks():
-    known = []
+def _nmcli_wifi_ssids():
+    """Return list of (nm_name, ssid) for all saved wifi profiles."""
+    results = []
     try:
+        # Step 1: get all wifi connection names
         out = subprocess.check_output(
             ['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'],
             stderr=subprocess.DEVNULL
         ).decode()
+        wifi_names = []
         for line in out.strip().split('\n'):
-            parts = line.split(':')
-            if len(parts) >= 2 and '802-11-wireless' in parts[1]:
-                name = parts[0].strip()
-                if name and name != 'plink-ap':
-                    known.append(name)
+            parts = re.split(r'(?<!\\):', line, maxsplit=1)
+            if len(parts) == 2 and '802-11-wireless' in parts[1]:
+                wifi_names.append(parts[0].replace('\\:', ':'))
+        # Step 2: query each for its SSID
+        for nm_name in wifi_names:
+            try:
+                ssid_out = subprocess.check_output(
+                    ['nmcli', '-t', '-f', '802-11-wireless.ssid', 'connection', 'show', 'id', nm_name],
+                    stderr=subprocess.DEVNULL
+                ).decode().strip()
+                # output: "802-11-wireless.ssid:Airtel_2A_2.4"
+                ssid = ssid_out.split(':', 1)[-1].replace('\\:', ':') if ':' in ssid_out else ssid_out
+                results.append((nm_name, ssid))
+            except Exception:
+                pass
     except Exception:
         pass
+    return results
 
+
+@app.route('/api/wifi/networks', methods=['GET'])
+def api_wifi_networks():
     visible = []
     try:
         out = subprocess.check_output(
             ['sudo', 'iwlist', 'wlan0', 'scan'],
             stderr=subprocess.DEVNULL
         ).decode()
-        import re
         visible = list(dict.fromkeys(re.findall(r'ESSID:"([^"]+)"', out)))
+    except Exception:
+        pass
+
+    visible_set = set(visible)
+    known = []
+    try:
+        for nm_name, ssid in _nmcli_wifi_ssids():
+            if nm_name == 'plink-ap' or not ssid:
+                continue
+            if ssid in visible_set:
+                known.append(ssid)
     except Exception:
         pass
 
@@ -603,6 +675,14 @@ def api_wifi_networks():
         json.dumps({'known': known, 'visible': visible}),
         mimetype='application/json'
     )
+
+
+def _find_nm_profile_for_ssid(ssid):
+    """Return NM connection name whose 802-11-wireless.ssid matches ssid, or None."""
+    for nm_name, s in _nmcli_wifi_ssids():
+        if s == ssid:
+            return nm_name
+    return None
 
 
 @app.route('/api/wifi', methods=['POST'])
@@ -615,33 +695,49 @@ def api_wifi_connect():
         return app.response_class(json.dumps({'error': 'ssid required'}), status=400, mimetype='application/json')
 
     try:
-        # Remove existing profile for this SSID if present (ignore errors)
-        subprocess.call(
-            ['nmcli', 'connection', 'delete', 'id', ssid],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        existing_profile = _find_nm_profile_for_ssid(ssid)
 
         if password:
-            add_cmd = [
+            # New/updated password: delete existing profile, create fresh one
+            if existing_profile:
+                subprocess.call(
+                    ['nmcli', 'connection', 'delete', 'id', existing_profile],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            # Ignore exit code — NM returns exit 4 in AP mode even with autoconnect no
+            subprocess.call([
                 'nmcli', 'connection', 'add',
                 'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
                 'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
-                'connection.autoconnect', 'yes',
-            ]
+                'connection.autoconnect', 'no',
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Verify profile was actually saved before proceeding
+            if not _find_nm_profile_for_ssid(ssid):
+                return app.response_class(
+                    json.dumps({'error': 'Failed to save WiFi credentials. Try again.'}),
+                    status=500, mimetype='application/json'
+                )
+            subprocess.call([
+                'nmcli', 'connection', 'modify', ssid, 'connection.autoconnect', 'yes',
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif existing_profile:
+            # Known network, no new password: reuse existing profile.
+            # toggle_hotspot.sh restores autoconnect on switch-back; ignore failure here
+            # (pi user lacks sudo to modify system NM profiles).
+            subprocess.call(
+                ['nmcli', 'connection', 'modify', existing_profile, 'connection.autoconnect', 'yes'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
         else:
-            add_cmd = [
-                'nmcli', 'connection', 'add',
-                'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
-                'wifi-sec.key-mgmt', 'none',
-                'connection.autoconnect', 'yes',
-            ]
-
-        subprocess.check_call(add_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return app.response_class(
+                json.dumps({'error': 'No saved credentials for this network. Provide a password.'}),
+                status=400, mimetype='application/json'
+            )
 
         def _switch():
             time.sleep(2)
             subprocess.Popen(
-                ['/home/pi/PiInk/pi-scripts/scripts/toggle_hotspot.sh'],
+                ['/home/pi/PiInk/scripts/toggle_hotspot.sh'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True
@@ -649,6 +745,79 @@ def api_wifi_connect():
 
         threading.Thread(target=_switch, daemon=True).start()
 
+        return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
+    except Exception as e:
+        return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
+
+
+@app.route('/api/wifi/switch', methods=['POST'])
+def api_wifi_switch():
+    """Switch Pi to a different WiFi while already in client mode (no hotspot toggle)."""
+    data = request.get_json(force=True, silent=True) or {}
+    ssid = data.get('ssid', '').strip()
+    password = (data.get('password', '') or '').strip() or None
+
+    if not ssid:
+        return app.response_class(json.dumps({'error': 'ssid required'}), status=400, mimetype='application/json')
+
+    try:
+        existing_profile = _find_nm_profile_for_ssid(ssid)
+
+        if password:
+            if existing_profile:
+                subprocess.call(
+                    ['nmcli', 'connection', 'delete', 'id', existing_profile],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            subprocess.call([
+                'nmcli', 'connection', 'add',
+                'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
+                'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
+                'connection.autoconnect', 'yes',
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if not _find_nm_profile_for_ssid(ssid):
+                return app.response_class(
+                    json.dumps({'error': 'Failed to save WiFi credentials. Try again.'}),
+                    status=500, mimetype='application/json'
+                )
+        elif not existing_profile:
+            return app.response_class(
+                json.dumps({'error': 'No saved credentials for this network. Provide a password.'}),
+                status=400, mimetype='application/json'
+            )
+
+        profile = _find_nm_profile_for_ssid(ssid) or ssid
+
+        def _do_switch():
+            time.sleep(2)
+            subprocess.call(
+                ['nmcli', 'con', 'up', profile, 'ifname', 'wlan0'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            time.sleep(3)
+            subprocess.call(
+                ['sudo', 'systemctl', 'restart', 'avahi-daemon'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+        threading.Thread(target=_do_switch, daemon=True).start()
+        return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
+    except Exception as e:
+        return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
+
+
+@app.route('/api/hotspot/screen', methods=['POST'])
+def api_hotspot_screen():
+    data = request.get_json(force=True, silent=True) or {}
+    mode = data.get('mode', 'ap')
+    password = data.get('password', 'plink123')
+    try:
+        sys.path.insert(0, '/home/pi/PiInk/scripts')
+        import show_hotspot_screen as shs
+        img = shs.draw_ap_screen(password) if mode == 'ap' else shs.draw_client_screen()
+        threading.Thread(target=lambda: (
+            inky_display.set_image(img), inky_display.show()
+        ), daemon=True).start()
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
@@ -1002,10 +1171,16 @@ def share_target():
 
 if _gpio_available:
     try:
-        for pin in BUTTONS:
+        for pin in [6, 16, 24]:
             GPIO.add_event_detect(pin, GPIO.FALLING, handleButton, bouncetime=250)
     except Exception as e:
         print(f"GPIO event detection skipped: {e}")
+    try:
+        GPIO.add_event_detect(BUTTON_A, GPIO.BOTH, callback=lambda p: (
+            handleButtonPress(p) if GPIO.input(p) == GPIO.LOW else handleButtonRelease(p)
+        ), bouncetime=50)
+    except Exception as e:
+        print(f"GPIO button A detection skipped: {e}")
 
 def _ensure_tailscale_serve():
     try:
