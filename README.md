@@ -21,6 +21,7 @@ Send a moment to your plink.
 - Web Share Target — share photos directly from the iOS/Android Photos app
 - Haptic feedback on iOS 18+ and Android
 - Swipe-to-dismiss sheets with spring animations
+- E-Ink Enhance — Spectra 6 palette quantization with Floyd-Steinberg dithering applied at upload time; toggle from the iOS app
 - Device controls: rotate display, clear ghosting, reboot, shutdown
 - Hotspot/AP mode — Pi broadcasts `plink-setup` Wi-Fi for initial provisioning
 - Online/offline status dot — auto-detects connectivity, shows local URL hint when on Tailscale and Pi is unreachable

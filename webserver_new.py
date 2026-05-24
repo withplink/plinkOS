@@ -13,7 +13,7 @@ inky_display = Inky(
     colour="multi"
 )
 
-from PIL import ImageDraw,Image
+from PIL import ImageDraw, Image, ImageEnhance, ImageFilter, ImageOps
 BUTTON_A = 5
 BUTTONS = [BUTTON_A, 6, 16, 24]
 ORIENTATION = 0
@@ -102,7 +102,89 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def compress_image(filepath, max_size=(1600, 960), quality=90):
+# Spectra 6 palette colors (muted, matching Inky Impression 7.3" e-ink)
+_SPECTRA6_COLORS = [
+    (0, 0, 0),        # Black
+    (255, 255, 255),  # White
+    (160, 32, 32),    # Red
+    (240, 224, 80),   # Yellow
+    (96, 128, 80),    # Green
+    (80, 128, 184),   # Blue
+]
+
+# Saturated primaries used for PIL quantize distance step — better color bucket assignment
+# than muted Spectra6 values. Palette is swapped to actual ink colors after quantize.
+_SPECTRA6_SATURATED = [
+    (0, 0, 0),        # Black
+    (255, 255, 255),  # White
+    (255, 0, 0),      # Red
+    (255, 255, 0),    # Yellow
+    (0, 255, 0),      # Green
+    (0, 0, 255),      # Blue
+]
+
+_SPECTRA6_QUANTIZE_PALETTE = None
+_SPECTRA6_OUTPUT_PALETTE = None
+
+def _build_palette(colors):
+    flat = []
+    for r, g, b in colors:
+        flat.extend([r, g, b])
+    flat += [0] * (768 - len(flat))
+    p = Image.new('P', (1, 1))
+    p.putpalette(flat)
+    return p
+
+def _get_quantize_palette():
+    global _SPECTRA6_QUANTIZE_PALETTE
+    if _SPECTRA6_QUANTIZE_PALETTE is None:
+        _SPECTRA6_QUANTIZE_PALETTE = _build_palette(_SPECTRA6_SATURATED)
+    return _SPECTRA6_QUANTIZE_PALETTE
+
+def _get_output_palette():
+    global _SPECTRA6_OUTPUT_PALETTE
+    if _SPECTRA6_OUTPUT_PALETTE is None:
+        flat = []
+        for r, g, b in _SPECTRA6_COLORS:
+            flat.extend([r, g, b])
+        _SPECTRA6_OUTPUT_PALETTE = flat + [0] * (768 - len(flat))
+    return _SPECTRA6_OUTPUT_PALETTE
+
+def process_for_eink(src_path, dst_path):
+    try:
+        img = Image.open(src_path).convert('RGB')
+        img = ImageOps.autocontrast(img, cutoff=1)
+        img = ImageEnhance.Contrast(img).enhance(1.2)
+        img = ImageEnhance.Color(img).enhance(1.3)
+        img = img.filter(ImageFilter.UnsharpMask(radius=0.8, percent=80, threshold=3))
+
+        # Quantize with saturated primaries (PIL C-level, ~0.1s) then remap to actual ink colors
+        quantized = img.quantize(palette=_get_quantize_palette(), dither=Image.Dither.FLOYDSTEINBERG)
+        quantized.putpalette(_get_output_palette())
+        quantized.convert('RGB').save(dst_path, 'JPEG', quality=95)
+    except Exception as e:
+        print(f"process_for_eink error: {e}")
+
+def get_eink_enhance():
+    try:
+        with open(os.path.join(PATH, "config/settings.json")) as f:
+            return json.load(f).get("eink_enhance", True)
+    except Exception:
+        return True
+
+def save_eink_enhance(val):
+    settings_path = os.path.join(PATH, "config/settings.json")
+    try:
+        with open(settings_path) as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    data["eink_enhance"] = bool(val)
+    os.makedirs(os.path.join(PATH, "config"), exist_ok=True)
+    with open(settings_path, "w") as f:
+        json.dump(data, f)
+
+def compress_image(filepath, max_size=(800, 480), quality=90):
     try:
         img = Image.open(filepath).convert('RGB')
         img.thumbnail(max_size, Image.LANCZOS)
@@ -197,7 +279,8 @@ def api_status():
         q = load_queue()
         if q["items"]:
             cur = q.get("current", 0) % len(q["items"])
-            fname = q["items"][cur]["filename"]
+            item = q["items"][cur]
+            fname = item.get("display_filename") if (get_eink_enhance() and item.get("display_filename")) else item["filename"]
             fpath = os.path.join(app.config['UPLOAD_FOLDER'], fname)
             if os.path.isfile(fpath):
                 image_url = '/uploads/' + fname
@@ -224,7 +307,7 @@ def api_status():
         ap_mode = os.path.exists('/tmp/plink_ap_mode')
 
     return app.response_class(
-        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering, 'ap_mode': ap_mode}),
+        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering, 'ap_mode': ap_mode, 'eink_enhance': get_eink_enhance()}),
         mimetype='application/json'
     )
 
@@ -242,7 +325,16 @@ def api_upload():
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
-            updateEink(filename, orientation, True)
+            compress_image(filepath)
+            disp_filename = None
+            disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
+            disp_filename_candidate = disp_ts + secure_filename(file.filename)
+            disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
+            process_for_eink(filepath, disp_filepath)
+            if os.path.isfile(disp_filepath):
+                disp_filename = disp_filename_candidate
+            show_fname = disp_filename if (disp_filename and get_eink_enhance()) else filename
+            updateEink(show_fname, orientation, True)
             return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename}), mimetype='application/json')
         else:
             return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
@@ -272,11 +364,15 @@ def api_action():
         q = load_queue()
         if not q["items"]:
             return app.response_class(json.dumps({'error': 'No image to rotate'}), status=400, mimetype='application/json')
-        fname = q["items"][q["current"]]["filename"]
+        item = q["items"][q["current"]]
+        fname = item["filename"]
         fpath = os.path.join(PATH, 'img', fname)
         with Image.open(fpath) as img:
             rotated = img.rotate(-90, Image.NEAREST, expand=1)
             rotated.save(fpath)
+        disp_fp = item.get("display_filename")
+        if disp_fp:
+            process_for_eink(fpath, os.path.join(app.config['UPLOAD_FOLDER'], disp_fp))
         threading.Thread(target=_show_queue_item, args=(q, q["current"]), daemon=True).start()
         return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + fname}), mimetype='application/json')
 
@@ -292,6 +388,8 @@ def api_settings():
         vert  = '' if orientation == 'landscape' else 'checked'
         _, _, ar = loadSettings()
         saveSettings(horiz, vert, ar)
+        if 'eink_enhance' in data:
+            save_eink_enhance(bool(data['eink_enhance']))
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
@@ -305,6 +403,7 @@ _next_rotate_at = None
 
 _is_rendering = False
 _render_lock  = threading.Lock()
+_queue_lock   = threading.Lock()
 
 def _set_rendering(val):
     global _is_rendering
@@ -326,9 +425,16 @@ def save_queue(q):
 def _show_queue_item(q, idx):
     if not q["items"]:
         return
-    fname = q["items"][idx % len(q["items"])]["filename"]
+    item = q["items"][idx % len(q["items"])]
     _, horiz, _ = loadSettings()
     orientation = 0 if horiz == "checked" else 1
+    fname = None
+    if get_eink_enhance():
+        disp = item.get("display_filename")
+        if disp and os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], disp)):
+            fname = disp
+    if not fname:
+        fname = item["filename"]
     try:
         updateEink(fname, orientation, True)
     except Exception as e:
@@ -382,7 +488,6 @@ def api_queue_get():
 
 @app.route('/api/queue/add', methods=['POST'])
 def api_queue_add():
-    q = load_queue()
     try:
         label = request.form.get('label', '')
         if 'file' in request.files and request.files['file'].filename:
@@ -405,25 +510,49 @@ def api_queue_add():
                 orig_filename = orig_ts + secure_filename(orig_file.filename)
                 orig_filepath = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
                 orig_file.save(orig_filepath)
-                compress_image(orig_filepath)
+                compress_image(orig_filepath, max_size=(1600, 960))
+
+        disp_filename = None
+        if 'processed' in request.files and request.files['processed'].filename:
+            proc_file = request.files['processed']
+            if allowed_file(proc_file.filename):
+                proc_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
+                disp_filename_candidate = proc_ts + secure_filename(proc_file.filename)
+                disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
+                proc_file.save(disp_filepath)
+                compress_image(disp_filepath, max_size=(1600, 960))
+                disp_filename = disp_filename_candidate
+        else:
+            # fallback: Pi-side processing for PWA / web-share uploads
+            disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
+            disp_filename_candidate = disp_ts + secure_filename(file.filename)
+            disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
+            process_for_eink(filepath, disp_filepath)
+            if os.path.isfile(disp_filepath):
+                disp_filename = disp_filename_candidate
 
         show_now = request.form.get('show_now') == '1'
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
         if orig_filename:
             item["orig_filename"] = orig_filename
-        was_empty = len(q["items"]) == 0
+        if disp_filename:
+            item["display_filename"] = disp_filename
 
-        if show_now or was_empty:
-            q["items"].append(item)
-            new_idx = len(q["items"]) - 1
-            q["current"] = new_idx
-        else:
-            current = q.get("current", 0)
-            q["items"].insert(current, item)
-            new_idx = current
-            q["current"] = current + 1
+        with _queue_lock:
+            q = load_queue()
+            was_empty = len(q["items"]) == 0
 
-        save_queue(q)
+            if show_now or was_empty:
+                q["items"].append(item)
+                new_idx = len(q["items"]) - 1
+                q["current"] = new_idx
+            else:
+                current = q.get("current", 0)
+                q["items"].insert(current, item)
+                new_idx = current
+                q["current"] = current + 1
+
+            save_queue(q)
 
         if was_empty or show_now:
             threading.Thread(target=_show_queue_item, args=(q, new_idx), daemon=True).start()
@@ -446,8 +575,9 @@ def api_queue_remove():
         old_current = q.get("current", 0)
         item = q["items"].pop(idx)
 
-        # Delete file only if no other queue item references it AND queue is not now empty
-        # (keep the file if queue becomes empty — it's still showing on e-ink)
+        # Delete files only if no other queue item references the same filename.
+        # Keep filename when queue becomes empty (still showing on e-ink for preview),
+        # but always delete display_filename — it's a processed copy, not the shown original.
         if not any(i["filename"] == item["filename"] for i in q["items"]):
             if len(q["items"]) > 0:
                 fp = os.path.join(app.config['UPLOAD_FOLDER'], item["filename"])
@@ -458,6 +588,11 @@ def api_queue_remove():
                     ofp = os.path.join(app.config['UPLOAD_FOLDER'], orig_fp)
                     if os.path.isfile(ofp):
                         os.remove(ofp)
+            disp_fp = item.get("display_filename")
+            if disp_fp:
+                dfp = os.path.join(app.config['UPLOAD_FOLDER'], disp_fp)
+                if os.path.isfile(dfp):
+                    os.remove(dfp)
 
         # Adjust current pointer correctly
         if idx < old_current:
@@ -525,7 +660,26 @@ def api_queue_replace():
                 orig_filename = orig_ts + secure_filename(orig_file.filename)
                 orig_filepath = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
                 orig_file.save(orig_filepath)
-                compress_image(orig_filepath)
+                compress_image(orig_filepath, max_size=(1600, 960))
+
+        disp_filename = None
+        if 'processed' in request.files and request.files['processed'].filename:
+            proc_file = request.files['processed']
+            if allowed_file(proc_file.filename):
+                proc_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
+                disp_filename_candidate = proc_ts + secure_filename(proc_file.filename)
+                disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
+                proc_file.save(disp_filepath)
+                compress_image(disp_filepath, max_size=(1600, 960))
+                disp_filename = disp_filename_candidate
+        else:
+            # fallback: Pi-side processing for PWA / web-share uploads
+            disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
+            disp_filename_candidate = disp_ts + secure_filename(file.filename)
+            disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
+            process_for_eink(filepath, disp_filepath)
+            if os.path.isfile(disp_filepath):
+                disp_filename = disp_filename_candidate
 
         # Delete old files
         old_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_item["filename"])
@@ -536,6 +690,11 @@ def api_queue_replace():
             old_orig_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_orig)
             if os.path.isfile(old_orig_fp):
                 os.remove(old_orig_fp)
+        old_disp = old_item.get("display_filename")
+        if old_disp:
+            old_disp_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_disp)
+            if os.path.isfile(old_disp_fp):
+                os.remove(old_disp_fp)
 
         new_item = {
             "filename": filename,
@@ -544,6 +703,8 @@ def api_queue_replace():
         }
         if orig_filename:
             new_item["orig_filename"] = orig_filename
+        if disp_filename:
+            new_item["display_filename"] = disp_filename
         q["items"][idx] = new_item
         save_queue(q)
 
@@ -1047,11 +1208,15 @@ def rotateImage(deg):
     q = load_queue()
     if not q["items"]:
         return
-    filename = q["items"][q["current"]]["filename"]
+    item = q["items"][q["current"]]
+    filename = item["filename"]
     with Image.open(os.path.join(PATH, "img/", filename)) as img:
         img = img.rotate(deg, Image.NEAREST, expand=1)
-        img = img.save(os.path.join(PATH, "img/", filename))
-        updateEink(filename, ORIENTATION, ADJUST_AR)
+        img.save(os.path.join(PATH, "img/", filename))
+    disp_fp = item.get("display_filename")
+    if disp_fp:
+        process_for_eink(os.path.join(PATH, "img/", filename), os.path.join(app.config['UPLOAD_FOLDER'], disp_fp))
+    _show_queue_item(q, q["current"])
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -1152,9 +1317,22 @@ def share_target():
                 q = load_queue()
                 ts = datetime.now().strftime('%Y%m%d_%H%M%S_')
                 filename = ts + secure_filename(file.filename)
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                compress_image(filepath)
                 label = file.filename.rsplit('.', 1)[0]
+
+                disp_filename = None
+                disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
+                disp_filename_candidate = disp_ts + secure_filename(file.filename)
+                disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
+                process_for_eink(filepath, disp_filepath)
+                if os.path.isfile(disp_filepath):
+                    disp_filename = disp_filename_candidate
+
                 item = {"filename": filename, "label": label, "added_at": datetime.now().isoformat()}
+                if disp_filename:
+                    item["display_filename"] = disp_filename
                 q["items"].append(item)
                 new_idx = len(q["items"]) - 1
                 was_empty = new_idx == 0
@@ -1194,4 +1372,4 @@ def _ensure_tailscale_serve():
 if __name__ == '__main__':
     app.secret_key = str(random.randint(100000,999999))
     _ensure_tailscale_serve()
-    app.run(host="::", port=80, threaded=True)
+    app.run(host="0.0.0.0", port=80, threaded=True)

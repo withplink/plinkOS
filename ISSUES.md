@@ -33,7 +33,14 @@
 
 ## [WiFi] Validate WiFi connection logic across all scenarios — no loopholes
 
-**Repro:** Not described. Need to audit how the Pi connects to WiFi in different scenarios (initial setup, AP mode, client mode, network loss, Tailscale, etc.) and ensure there are no edge cases or loopholes.
+**Repro:** Not described. Audit all WiFi scenarios end-to-end and verify no silent failures or gaps:
+- **Initial setup** — Pi connects to home WiFi for first time via `plink.sh`
+- **AP mode → client mode** — after user enters WiFi creds in hotspot UI, does it reliably switch back?
+- **Network loss** — Pi loses WiFi mid-session, does it reconnect or hang?
+- **Known network priority** — multiple saved networks, which wins?
+- **Tailscale + WiFi** — does Tailscale survive a WiFi reconnect?
+- **Static IP conflicts** — if `192.168.1.50` is taken, what happens?
+- **wpa_supplicant vs nmcli** — both touch network config; any race conditions?
 
 **Root cause:** Not investigated.
 

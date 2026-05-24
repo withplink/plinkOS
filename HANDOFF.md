@@ -1,34 +1,38 @@
 # Handoff
 
 ## Goal
-Tailscale disconnect reliability and auth UX polish.
+
+Implement fast, high-quality e-ink image processing for Spectra 6 — offload numpy Floyd-Steinberg dithering to iPhone (Swift), keeping Pi's numpy path as fallback for web share uploads.
 
 ## Current State
-- Disconnect on Pi just `tailscale logout` (no `systemctl disable --now`) — HTTP response completes cleanly
-- iOS disconnect has 5s timeout (was 90s)
-- Auto-connects after auth without confirmation dialog
-- Auto-selects next frame after disconnect with toast
-- `tailscale://` deep link preferred over Safari (stays logged in in app)
-- All pushed to both repos; Pi deployed via push.sh
-- Full disconnect→auto-select→reconnect flow untested on hardware
+
+- **Numpy FS confirmed good quality**: tested on Pi at 800×480, 128s — warm tones preserved, clearly better than PIL
+- **PIL path (current)**: fast (~0.1s) but washed out — fundamental flaw, saturated-primaries quantization maps warm/muted tones to wrong colors
+- **Palette values correct**: our `_SPECTRA6_COLORS` already matches Pimoroni-measured values exactly — not the problem
+- **resize_images.py done + deployed**: all 16 queue items resized from 1600×960 → 800×480 (30 files resized)
+- **numpy test result saved**: `/Users/shoaibahmed/code/personal/pi-ink/compare/numpy.jpg` (Window Seat), `compare/friends_numpy.jpg` (Friends)
+- **Friends numpy result**: copied to Pi at `/home/pi/PiInk/img/20260524_174307_display_photo.jpg` — NOT yet shown on frame (user blocked the show API call)
+- **Decision made**: offload numpy FS to iPhone Swift before upload; Pi keeps async numpy as fallback for web share
 
 ## Files in Flight
-- `webserver_new.py` — disconnect endpoint (no tailscaled kill); deployed to Pi
-- `Plink/Views/Tabs/SettingsTab.swift` — auth deep link, auto-connect, auto-select
-- `Plink/Networking/FrameClient.swift` — 5s disconnect timeout
-- `Plink/Info.plist` — `LSApplicationQueriesSchemes` for `tailscale://`
+
+- `Plink/Plink/` — Swift implementation of FS dithering needs to be added here
+- `webserver_new.py` — needs async numpy fallback for web share / non-iOS uploads
+- `pi-scripts/backfill_eink.py` — will need update once async Pi path is implemented
 
 ## Changed
-- **Disconnect (Pi)**: removed `systemctl disable --now tailscaled` — just `tailscale logout` so response completes, tailscaled stays running for quick reconnect
-- **Disconnect timeout (iOS)**: `tailscaleDisconnect` uses `URLSession.shared` with 5s timeout instead of `actionSession` (90s)
-- **Auto-connect (iOS)**: removed "Switch to Remote Frame?" alert — auto-connects when reachable after auth
-- **Auto-select (iOS)**: after disconnect, activates next frame with toast; if none, "No frames available" toast
-- **Auth deep link (iOS)**: `tailscale://` URL scheme if app installed (avoids re-login); falls back to Safari
-- **Info.plist**: added `LSApplicationQueriesSchemes` with `tailscale` for `canOpenURL` check
+
+- **`pi-scripts/resize_images.py`** (new): resizes all queue `filename` + `orig_filename` to max 800×480 in-place; deployed via push.sh; ran successfully (30 files resized)
+- **`push.sh`**: added "Upload resize script" step
+- **`compare/numpy.jpg`**: replaced with 719×431 Window Seat numpy result (correct quality reference)
+- **`compare/friends_numpy.jpg`** (new): Friends image numpy result at 800×480
 
 ## Failed Attempts
-- `.universalLinksOnly: true` for auth URL — Tailscale app doesn't register Universal Links for `login.tailscale.com`; replaced with `tailscale://` URL scheme
-- `systemctl disable --now tailscaled` during disconnect — kills TCP connection mid-response, hangs iOS request for 90s
+
+- **PIL quantize with saturated primaries**: fast but washed out — euclidean RGB maps warm greys/browns to blue. Fundamental flaw, not fixable with preprocessing tweaks
+- **myevit's approach**: same saturated-primaries trick, same fundamental flaw — their contrast 1.4 / EDGE_ENHANCE doesn't fix palette mismatch
+- **LAB color space**: discussed but not tried yet — could improve numpy quality but doesn't solve the 128s speed problem
 
 ## Next Step
-Test full disconnect→auto-select→reconnect flow on hardware. Verify `tailscale://` opens Tailscale app. Verify auto-connect after auth skips confirmation dialog.
+
+Implement Floyd-Steinberg dithering in Swift in the Plink iOS app. On upload: (1) apply preprocessing (autocontrast, contrast ×1.2, saturation ×1.3, unsharp mask), (2) run FS dithering against Spectra6 palette `[(0,0,0),(255,255,255),(160,32,32),(240,224,80),(96,128,80),(80,128,184)]` using euclidean RGB distance per pixel, (3) upload processed image to Pi as the display file. Pi server should accept a pre-processed flag or just store it directly as `display_filename`. Swift CPU path at 384k pixels should be <0.5s.

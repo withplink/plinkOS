@@ -92,6 +92,18 @@ step "Upload webserver" \
 step "Upload frontend" \
   "$SCP main.html '$HOST:/home/pi/PiInk/src/templates/main.html'"
 
+step "Upload hotspot screen" \
+  "$SCP pi-scripts/scripts/show_hotspot_screen.py '$HOST:/home/pi/PiInk/scripts/show_hotspot_screen.py'"
+
+step "Upload hotspot toggle" \
+  "$SCP pi-scripts/scripts/toggle_hotspot.sh '$HOST:/home/pi/PiInk/scripts/toggle_hotspot.sh'"
+
+step "Upload backfill script" \
+  "$SCP pi-scripts/backfill_eink.py '$HOST:/home/pi/PiInk/scripts/backfill_eink.py'"
+
+step "Upload resize script" \
+  "$SCP pi-scripts/resize_images.py '$HOST:/home/pi/PiInk/scripts/resize_images.py'"
+
 # ── Phase 2: Restart ──
 section "2/2" "Restarting frame"
 

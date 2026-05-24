@@ -10,10 +10,11 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 try:
-    from inky.auto import auto
-    inky = auto()
+    from inky.inky_e673 import Inky
+    inky = Inky(resolution=(800, 480), colour="multi")
     W, H = inky.width, inky.height
 except Exception:
+    inky = None
     W, H = 800, 480  # fallback for testing
 
 SSID = "plink-setup"
@@ -113,8 +114,8 @@ def draw_client_screen() -> Image.Image:
 
 def show(img: Image.Image):
     try:
-        from inky.auto import auto
-        inky = auto()
+        if inky is None:
+            raise RuntimeError("inky not initialised")
         inky.set_image(img)
         inky.show()
     except Exception as e:

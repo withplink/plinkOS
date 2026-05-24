@@ -86,6 +86,25 @@ divider() {
 echo ""
 section "" "Cleaning Pi"
 
+# ── Show default image before wiping (e-ink persists after reset) ──
+_DEFAULT_IMG=""
+_DEFAULT_EXT=""
+for _ext in jpg jpeg png webp; do
+  if [ -f "$SCRIPT_DIR/../default-image.$_ext" ]; then
+    _DEFAULT_IMG="$SCRIPT_DIR/../default-image.$_ext"
+    _DEFAULT_EXT="$_ext"
+    break
+  fi
+done
+if [ -n "$_DEFAULT_IMG" ]; then
+  SCP="sshpass -p $PI_PASS scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR"
+  _step_show_default() {
+    $SCP "$_DEFAULT_IMG" "$PI_USER@$PI_HOST:/tmp/default-image.$_DEFAULT_EXT" && \
+    $SSH "curl -sf -X POST -F 'file=@/tmp/default-image.$_DEFAULT_EXT' http://localhost/api/upload > /dev/null && rm -f /tmp/default-image.$_DEFAULT_EXT"
+  }
+  step "Set default image" _step_show_default
+fi
+
 step "Stop services" \
   $SSH "echo '$PI_PASS' | sudo -S systemctl stop piink plink-buttons plink-boot-check 2>/dev/null || true"
 

@@ -246,7 +246,14 @@ for _ext in jpg jpeg png webp; do
   fi
 done
 if [ -n "$_DEFAULT_IMG" ]; then
+  _queue_has_items() {
+    _count=$($SSH "python3 -c \"import json,sys; d=json.load(open('/home/pi/PiInk/config/queue.json')) if __import__('os').path.exists('/home/pi/PiInk/config/queue.json') else {}; print(len(d.get('items',[])))\" 2>/dev/null" || echo "0")
+    [ "${_count:-0}" -gt 0 ]
+  }
   _step_default_image() {
+    if _queue_has_items; then
+      return 0
+    fi
     $SCP "$_DEFAULT_IMG" "$PI:/tmp/default-image.$_DEFAULT_EXT" && \
     $SSH "curl -sf -X POST -F 'file=@/tmp/default-image.$_DEFAULT_EXT' http://localhost/api/upload > /dev/null && rm -f /tmp/default-image.$_DEFAULT_EXT"
   }

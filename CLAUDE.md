@@ -33,6 +33,7 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 - `pi-scripts/setup-local.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
 - `pi-scripts/setup-remote.sh` → remote setup over SSH (called by `plink.sh`, has spinner UI)
 - `pi-scripts/reset.sh` → resets Pi to pre-install state
+- `pi-scripts/backfill_eink.py` → re-processes all queue items through the current e-ink pipeline (run on Pi after pipeline changes)
 - `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Reset/Push menu)
 
 ### Setup Script UX
@@ -59,7 +60,7 @@ sshpass -p '<password>' ssh pi@pi.local "echo '<password>' | sudo -S systemctl r
 
 ## Stack
 
-- **Backend:** Flask on port 80, `host="::"`, `threaded=True`
+- **Backend:** Flask on port 80, `host="0.0.0.0"`, `threaded=True`
 - **Frontend:** React 18 + Babel standalone (no build step), Jinja2 template
 - JSX is wrapped in `{% raw %}...{% endraw %}` to avoid Jinja2 `{{}}` conflicts
 - No component library — all UI is hand-rolled with inline styles
@@ -113,25 +114,40 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 
 ## Queue System
 
-- `/home/pi/PiInk/config/queue.json`: `{items:[{filename, label, added_at, orig_filename?}], current:0, interval:0}`
-- `orig_filename` is the pre-crop original; stored when uploaded via `/api/queue/replace`
+- `/home/pi/PiInk/config/queue.json`: `{items:[{filename, label, added_at, orig_filename?, display_filename?}], current:0, interval:0}`
+- `orig_filename` — pre-crop original; stored when uploaded via `/api/queue/replace`
+- `display_filename` — Spectra 6 e-ink-processed JPEG; generated at upload time by `process_for_eink()`
+- `_show_queue_item` uses `display_filename` when `eink_enhance=true`, falls back to `filename`
 - Filenames prefixed with timestamp (`YYYYMMDD_HHMMSS_`) to avoid collisions
-- `threading.Timer` + `threading.Lock` for auto-rotate
+- `threading.Timer` + `threading.Lock` for auto-rotate; `_queue_lock` guards `api_queue_add` writes for thread safety
 - When queue becomes empty, keep the last file on disk (still showing on e-ink)
+
+## E-Ink Enhancement Pipeline
+
+- `compress_image(filepath, max_size=(800,480), quality=90)` — shrinks uploads before display; orig/replace files use `max_size=(1600,960)` explicitly
+- `process_for_eink(src_path, dst_path)` — PIL-only pipeline:
+  1. `ImageOps.autocontrast(cutoff=1)` + contrast ×1.2 + color saturation ×1.3 + unsharp mask
+  2. `img.quantize(palette=_get_quantize_palette(), dither=FLOYDSTEINBERG)` — quantizes against **saturated** primaries (`_SPECTRA6_SATURATED`) for better color bucket assignment
+  3. `quantized.putpalette(_get_output_palette())` — remaps to actual Spectra 6 ink colors (`_SPECTRA6_COLORS`)
+  4. Converts back to RGB, saves as JPEG quality=95
+- `_SPECTRA6_COLORS` = `[(0,0,0),(255,255,255),(160,32,32),(240,224,80),(96,128,80),(80,128,184)]`
+- `_SPECTRA6_SATURATED` = saturated primaries used only for quantize bucket assignment, not output
+- `get_eink_enhance()` / `save_eink_enhance(val)` — read/write `eink_enhance` key in `settings.json`
+- Toggle in iOS SettingsTab → POSTs `eink_enhance` to `/api/settings` → server re-displays current item
 
 ## Key API Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/status` | `{wifi, uptime, image_url, orientation, busy, ap_mode}` |
+| `GET` | `/api/status` | `{wifi, uptime, image_url, orientation, busy, ap_mode, eink_enhance}` |
 | `POST` | `/api/upload` | Multipart file upload; shows immediately or adds to queue |
 | `POST` | `/api/action` | `{action}`: `rotate`, `clear_ghost`, `reboot`, `shutdown` |
 | `POST` | `/api/settings` | Save orientation/aspect-ratio settings |
 | `GET` | `/api/queue` | Full queue state |
-| `POST` | `/api/queue/add` | Add item to queue |
+| `POST` | `/api/queue/add` | Add item to queue (multipart: `file`, `label?`, `show_now?`, optional `processed` pre-rendered e-ink JPEG) |
 | `POST` | `/api/queue/remove` | Remove item by index |
 | `POST` | `/api/queue/reorder` | Reorder items |
-| `POST` | `/api/queue/replace` | Replace item at index (multipart: `index`, `file`, optional `original`) |
+| `POST` | `/api/queue/replace` | Replace item at index (multipart: `index`, `file`, optional `original`, optional `processed` pre-rendered e-ink JPEG) |
 | `POST` | `/api/queue/next` | Advance to next item |
 | `POST` | `/api/queue/show` | Jump to item by index |
 | `POST` | `/api/queue/interval` | Set auto-rotate interval in minutes |
@@ -140,6 +156,11 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 | `GET` | `/api/wifi/networks` | `{known, visible}` — known SSIDs from `wpa_supplicant.conf` + Pi scan results |
 | `POST` | `/api/wifi` | `{ssid, password?}` — write creds, trigger hotspot→client switch after 2s |
 | `GET/POST` | `/share-target` | Web Share Target receiver; accepts shared photos from OS share sheet |
+| `POST` | `/api/wifi/switch` | Switch WiFi while in client mode (no hotspot toggle): `{ssid, password?}` |
+| `POST` | `/api/hotspot/screen` | Render AP or client screen to e-ink: `{mode: 'ap'|'client', password?}` |
+| `GET` | `/api/tailscale/status` | `{state: 'running'|'stopped', ip, url}` |
+| `POST` | `/api/tailscale/connect` | Start Tailscale; returns auth URL if not yet authenticated |
+| `POST` | `/api/tailscale/disconnect` | `tailscale logout` |
 
 ## Troubleshooting
 
