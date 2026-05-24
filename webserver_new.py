@@ -817,7 +817,12 @@ def api_wifi_networks():
             ['sudo', 'iwlist', 'wlan0', 'scan'],
             stderr=subprocess.DEVNULL
         ).decode()
-        visible = list(dict.fromkeys(re.findall(r'ESSID:"([^"]+)"', out)))
+        def _decode_ssid(s):
+            try:
+                return re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), s).encode('latin-1').decode('utf-8')
+            except Exception:
+                return s
+        visible = list(dict.fromkeys(_decode_ssid(s) for s in re.findall(r'ESSID:"([^"]+)"', out)))
     except Exception:
         pass
 
@@ -859,28 +864,32 @@ def api_wifi_connect():
         existing_profile = _find_nm_profile_for_ssid(ssid)
 
         if password:
-            # New/updated password: delete existing profile, create fresh one
+            nmcli_err = ''
             if existing_profile:
-                subprocess.call(
-                    ['nmcli', 'connection', 'delete', 'id', existing_profile],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            # Ignore exit code — NM returns exit 4 in AP mode even with autoconnect no
-            subprocess.call([
-                'nmcli', 'connection', 'add',
-                'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
-                'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
-                'connection.autoconnect', 'no',
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            # Verify profile was actually saved before proceeding
+                # Update password on existing profile — preserves static IP and other settings
+                subprocess.call([
+                    'sudo', 'nmcli', 'connection', 'modify', existing_profile,
+                    'wifi-sec.key-mgmt', 'wpa-psk',
+                    'wifi-sec.psk', password,
+                    'connection.autoconnect', 'yes',
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                # No existing profile — create new one
+                add_result = subprocess.run([
+                    'sudo', 'nmcli', 'connection', 'add',
+                    'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
+                    'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
+                    'connection.autoconnect', 'yes',
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                nmcli_err = add_result.stderr.decode().strip()
+            # Verify profile was actually saved — small sleep lets NM settle after add
+            time.sleep(0.5)
             if not _find_nm_profile_for_ssid(ssid):
+                detail = nmcli_err or 'nmcli connection add failed'
                 return app.response_class(
-                    json.dumps({'error': 'Failed to save WiFi credentials. Try again.'}),
+                    json.dumps({'error': f'Failed to save WiFi credentials: {detail}'}),
                     status=500, mimetype='application/json'
                 )
-            subprocess.call([
-                'nmcli', 'connection', 'modify', ssid, 'connection.autoconnect', 'yes',
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif existing_profile:
             # Known network, no new password: reuse existing profile.
             # toggle_hotspot.sh restores autoconnect on switch-back; ignore failure here
@@ -927,18 +936,21 @@ def api_wifi_switch():
         if password:
             if existing_profile:
                 subprocess.call(
-                    ['nmcli', 'connection', 'delete', 'id', existing_profile],
+                    ['sudo', 'nmcli', 'connection', 'delete', 'id', existing_profile],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
-            subprocess.call([
-                'nmcli', 'connection', 'add',
+            add_result = subprocess.run([
+                'sudo', 'nmcli', 'connection', 'add',
                 'type', 'wifi', 'con-name', ssid, 'ssid', ssid,
                 'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
                 'connection.autoconnect', 'yes',
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            nmcli_err = add_result.stderr.decode().strip()
+            time.sleep(0.5)
             if not _find_nm_profile_for_ssid(ssid):
+                detail = nmcli_err or 'nmcli connection add failed'
                 return app.response_class(
-                    json.dumps({'error': 'Failed to save WiFi credentials. Try again.'}),
+                    json.dumps({'error': f'Failed to save WiFi credentials: {detail}'}),
                     status=500, mimetype='application/json'
                 )
         elif not existing_profile:

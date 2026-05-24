@@ -2,37 +2,35 @@
 
 ## Goal
 
-Implement fast, high-quality e-ink image processing for Spectra 6 — offload numpy Floyd-Steinberg dithering to iPhone (Swift), keeping Pi's numpy path as fallback for web share uploads.
+iOS app upload flow polish: unified dark glass progress modal, no success toasts, correct state labels across all upload paths (new send, queue add, recrop).
 
 ## Current State
 
-- **Numpy FS confirmed good quality**: tested on Pi at 800×480, 128s — warm tones preserved, clearly better than PIL
-- **PIL path (current)**: fast (~0.1s) but washed out — fundamental flaw, saturated-primaries quantization maps warm/muted tones to wrong colors
-- **Palette values correct**: our `_SPECTRA6_COLORS` already matches Pimoroni-measured values exactly — not the problem
-- **resize_images.py done + deployed**: all 16 queue items resized from 1600×960 → 800×480 (30 files resized)
-- **numpy test result saved**: `/Users/shoaibahmed/code/personal/pi-ink/compare/numpy.jpg` (Window Seat), `compare/friends_numpy.jpg` (Friends)
-- **Friends numpy result**: copied to Pi at `/home/pi/PiInk/img/20260524_174307_display_photo.jpg` — NOT yet shown on frame (user blocked the show API call)
-- **Decision made**: offload numpy FS to iPhone Swift before upload; Pi keeps async numpy as fallback for web share
+### iOS (Plink) — completed this session
 
-## Files in Flight
+- `TransferProgressModal` replaces `PreparingMediaView` as the upload overlay. Five states: `.preparing` → `.optimizing` / `.sending` → `.refreshing` → `.done`. Dark glass aesthetic, circular progress ring, spring entrance.
+- Upload paths (`upload()`, `replaceQueueItem()`, `performAdd`) now batch `cancelPreparingMedia + setLoading` in single `MainActor.run` to prevent visual gap between preparing overlay clearing and progress modal appearing.
+- Success toasts removed from `upload()` and `replaceQueueItem()` — `.done` modal state provides haptic + visual confirmation.
+- Recrop/replace path shows "Updating display…" the whole time (not "Sending to frame…").
+- Queue-add path shows "Adding to queue…" (not "Optimizing…").
 
-- `Plink/Plink/` — Swift implementation of FS dithering needs to be added here
-- `webserver_new.py` — needs async numpy fallback for web share / non-iOS uploads
-- `pi-scripts/backfill_eink.py` — will need update once async Pi path is implemented
+### Server (pi-ink) — no changes this session
 
-## Changed
+- `api_queue_add` and `api_queue_replace` accept optional `processed` multipart field; stored as `display_filename`.
+- `process_for_eink()` runs server-side for non-iOS uploads (web share target).
+- `_show_queue_item` prefers `display_filename` when `eink_enhance=on`.
 
-- **`pi-scripts/resize_images.py`** (new): resizes all queue `filename` + `orig_filename` to max 800×480 in-place; deployed via push.sh; ran successfully (30 files resized)
-- **`push.sh`**: added "Upload resize script" step
-- **`compare/numpy.jpg`**: replaced with 719×431 Window Seat numpy result (correct quality reference)
-- **`compare/friends_numpy.jpg`** (new): Friends image numpy result at 800×480
+## EinkProcessor (prior session, needs panel test)
 
-## Failed Attempts
-
-- **PIL quantize with saturated primaries**: fast but washed out — euclidean RGB maps warm greys/browns to blue. Fundamental flaw, not fixable with preprocessing tweaks
-- **myevit's approach**: same saturated-primaries trick, same fundamental flaw — their contrast 1.4 / EDGE_ENHANCE doesn't fix palette mismatch
-- **LAB color space**: discussed but not tried yet — could improve numpy quality but doesn't solve the 128s speed problem
+Bayer 8×8 dithering replaces Floyd-Steinberg in `EinkProcessor.swift`:
+- Two-palette system: saturated primaries for quantize bucket assignment, actual Spectra 6 colors for output
+- Preprocessing: brightness +0.08, saturation ×1.4, contrast ×1.15, unsharp radius 1.5/0.9, Bayer threshold 12
+- Warm golden-hour tones should dither red+yellow instead of collapsing to grey-brown
+- **Not yet panel-tested** — needs rebuild + real-world display test
 
 ## Next Step
 
-Implement Floyd-Steinberg dithering in Swift in the Plink iOS app. On upload: (1) apply preprocessing (autocontrast, contrast ×1.2, saturation ×1.3, unsharp mask), (2) run FS dithering against Spectra6 palette `[(0,0,0),(255,255,255),(160,32,32),(240,224,80),(96,128,80),(80,128,184)]` using euclidean RGB distance per pixel, (3) upload processed image to Pi as the display file. Pi server should accept a pre-processed flag or just store it directly as `display_filename`. Swift CPU path at 384k pixels should be <0.5s.
+Build and deploy iOS app to device. Upload golden-hour warm-tone photo. Observe on panel at ~1m:
+- Smooth surfaces (skin, background): less grainy/muddy than before
+- Warm tones: red+yellow dithering instead of grey-brown
+- If crosshatch still visible: lower `bayerThreshold` (try 8). If too posterized: raise (try 15).

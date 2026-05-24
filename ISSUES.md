@@ -1,35 +1,47 @@
-## [ButtonA] Button A hotspot toggle broken — ping drops, no QR screen, image refresh instead
+## [Onboarding] No way to use frame without setting up WiFi first
 
 **Repro:**
-1. Press Button A (hold 1.5s) to toggle hotspot mode
-2. Ping to 192.168.1.50 drops for a couple seconds then resumes — suggests NetworkManager is restarting or WiFi blips
-3. Hotspot mode does NOT start
-4. Frame does not show QR screen
-5. Pressing A a second time refreshes display with currently selected image instead of toggling hotspot
+1. Pi in hotspot mode, iPhone connected to plink-setup
+2. Open Plink — "Find your frame" shows Pi IP
+3. Tap IP → lands directly on Choose WiFi screen
+4. No skip/later option — user cannot use frame (upload photos, view queue) without completing WiFi setup first
 
-**Root cause:** Not investigated. Likely `toggle_hotspot.sh` fails silently — hotspot doesn't come up but something (NetworkManager restart? partial script execution?) causes brief WiFi interruption and a display refresh side-effect.
-
-**AP mode lifecycle spec (desired behavior):**
-1. Button A press → Pi enters AP mode
-2. AP stays up for **at least 30 seconds** regardless (grace window for user to connect)
-3. If a client connects within those 30s → stay in AP mode until:
-   - Button A pressed again, OR
-   - No client connected for **30 seconds** (idle timeout)
-4. On AP exit (either trigger) → connect to latest available known WiFi network
+**Root cause:** Onboarding flow treats frame discovery as WiFi setup entry point with no bypass.
 
 **Status:** Not investigated.
 
 ---
 
-## [PiStability] Pi stops working and requires manual restart
+## [Onboarding] E-ink stays on QR screen after WiFi provisioning with empty queue
 
-**Repro:** Not described. Observed 2026-05-19 ~20:30 IST — both pi.local and static IP (192.168.1.50) unreachable. Manual restart restored access.
+**Repro:**
+1. Complete WiFi provisioning (hotspot → choose WiFi → Pi reconnects)
+2. Queue is empty
+3. Expected: e-ink clears QR screen and shows default/welcome state
+4. Actual: e-ink stays on QR screen until background ping job finds internet and calls `/api/queue/show`, which does nothing on empty queue
 
-**Root cause:** Not investigated. Hardware watchdog (1min timeout) triggered reboot. Likely OOM during image processing or kernel freeze. Journal was not persistent at time of incident — no pre-reboot logs available. Persistent journal now enabled.
+**Root cause:** `toggle_hotspot.sh` switch-back calls `/api/queue/show` with `index: 0` unconditionally. Empty queue → index 0 invalid → 400 → display never changes.
+
+**Fix:** Check queue length before calling `queue/show`. If empty, skip or show a "ready to use" clear screen instead.
 
 **Status:** Not investigated.
 
 ---
+
+## [Upload] No loading state after crop confirm — 3-4s blank before toast
+
+**Repro:**
+1. Tap + in Queue tab, pick photo
+2. Crop view opens, tap confirm (checkmark)
+3. Returns to queue page — loading overlay appears but only after 3-4s delay
+4. Toast "sending to screen" appears
+
+**Root cause:** Loading overlay exists but triggers too late — shown after upload starts, not immediately on crop confirm tap.
+
+**Status:** In progress.
+
+---
+
 
 ## [WiFi] Validate WiFi connection logic across all scenarios — no loopholes
 
@@ -42,27 +54,12 @@
 - **Static IP conflicts** — if `192.168.1.50` is taken, what happens?
 - **wpa_supplicant vs nmcli** — both touch network config; any race conditions?
 
-**Root cause:** Not investigated.
+**Root cause:** Partially investigated.
 
-**Status:** Not investigated.
-
----
-
-## [Tailscale] Move Tailscale setup to mobile app instead of terminal
-
-**Repro:** Terminal prompt in `setup-remote.sh` installs Tailscale and shows auth URL, but gives no visibility into the resulting device name (`pi`, `pi-1`, `pi-2`, etc. depending on prior registrations). User has no way to know which name to use for remote access without checking the Tailscale admin panel.
-
-**Desired:** Move Tailscale setup into the PWA. Flow:
-1. Install Tailscale on Pi silently during `setup-remote.sh` (no interactive prompt)
-2. In the app's settings/network screen, show a "Connect to Tailscale" button
-3. On tap: trigger `sudo tailscale up` on Pi, poll for auth URL, display it in-app as a tappable link
-4. After auth, show assigned device name and Tailscale IP so user knows exactly which URL to use remotely
-
-**Root cause:** Terminal-based flow has no feedback loop for device name resolution.
-
-**Status:** Fixed.
+**Status:** In progress.
 
 ---
+
 
 ## [SoftwareUpdate] OTA update of Pi software (webserver, frontend) triggered from mobile app
 
@@ -82,6 +79,19 @@
 - Disable power to non-essential USB ports
 - Disable unused system services (bluetooth, etc.)
 - Replace polling (30s / 8s status interval) with push-based updates (WebSocket or SSE)
+
+**Root cause:** Not investigated.
+
+**Status:** Not investigated.
+
+---
+
+## [WiFi] "Switch to X?" confirm dialog shows even when Pi already connected to that network
+
+**Repro:**
+1. Pi connected to Airtel_2A_2.4
+2. Open Choose WiFi — Airtel_2A_2.4 shows "Connected"
+3. Tap Airtel_2A_2.4 → confirm dialog says "Pi will disconnect from its current network and connect to Airtel_2A_2.4"
 
 **Root cause:** Not investigated.
 
