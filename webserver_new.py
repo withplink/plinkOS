@@ -532,11 +532,17 @@ def api_queue_add():
                 disp_filename = disp_filename_candidate
 
         show_now = request.form.get('show_now') == '1'
+        crop_meta_str = request.form.get('crop_meta')
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
         if orig_filename:
             item["orig_filename"] = orig_filename
         if disp_filename:
             item["display_filename"] = disp_filename
+        if crop_meta_str:
+            try:
+                item["crop_meta"] = json.loads(crop_meta_str)
+            except Exception:
+                pass
 
         with _queue_lock:
             q = load_queue()
@@ -558,7 +564,7 @@ def api_queue_add():
             threading.Thread(target=_show_queue_item, args=(q, new_idx), daemon=True).start()
 
         _schedule_rotate()
-        return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename, 'queue': q}), mimetype='application/json')
+        return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename, 'queue': q, 'new_idx': new_idx}), mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
@@ -696,6 +702,7 @@ def api_queue_replace():
             if os.path.isfile(old_disp_fp):
                 os.remove(old_disp_fp)
 
+        crop_meta_str = request.form.get('crop_meta')
         new_item = {
             "filename": filename,
             "label": old_item.get("label", filename),
@@ -705,6 +712,11 @@ def api_queue_replace():
             new_item["orig_filename"] = orig_filename
         if disp_filename:
             new_item["display_filename"] = disp_filename
+        if crop_meta_str:
+            try:
+                new_item["crop_meta"] = json.loads(crop_meta_str)
+            except Exception:
+                pass
         q["items"][idx] = new_item
         save_queue(q)
 
