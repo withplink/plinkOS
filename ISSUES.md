@@ -1,17 +1,3 @@
-## [Onboarding] No way to use frame without setting up WiFi first
-
-**Repro:**
-1. Pi in hotspot mode, iPhone connected to plink-setup
-2. Open Plink — "Find your frame" shows Pi IP
-3. Tap IP → lands directly on Choose WiFi screen
-4. No skip/later option — user cannot use frame (upload photos, view queue) without completing WiFi setup first
-
-**Root cause:** Onboarding flow treats frame discovery as WiFi setup entry point with no bypass.
-
-**Status:** Not investigated.
-
----
-
 ## [Onboarding] E-ink stays on QR screen after WiFi provisioning with empty queue
 
 **Repro:**
@@ -22,44 +8,25 @@
 
 **Root cause:** `toggle_hotspot.sh` switch-back calls `/api/queue/show` with `index: 0` unconditionally. Empty queue → index 0 invalid → 400 → display never changes.
 
-**Fix:** Check queue length before calling `queue/show`. If empty, skip or show a "ready to use" clear screen instead.
+**Fix:** `toggle_hotspot.sh` now checks queue length on switch-back. Empty queue → `render_screen default` (shows "Ready / Open Plink to upload your first photo"). Non-empty → `/api/queue/show` with current index as before. `draw_client_screen` removed; replaced by `draw_default_screen` in `show_hotspot_screen.py`.
+
+**Status:** Fix implemented, pending test.
+
+---
+
+
+
+## [DefaultScreen] Better default screen when Pi is connected to WiFi with empty queue
+
+**Repro:**
+1. Pi connected to WiFi, queue is empty
+2. E-ink shows a plain text "Ready / Open Plink to upload your first photo" placeholder
+
+**Root cause:** No designed default screen exists. Current placeholder is minimal text via `draw_default_screen()` in `show_hotspot_screen.py`.
 
 **Status:** Not investigated.
 
 ---
-
-## [Upload] No loading state after crop confirm — 3-4s blank before toast
-
-**Repro:**
-1. Tap + in Queue tab, pick photo
-2. Crop view opens, tap confirm (checkmark)
-3. Returns to queue page — loading overlay appears but only after 3-4s delay
-4. Toast "sending to screen" appears
-
-**Root cause:** Loading overlay exists but triggers too late — shown after upload starts, not immediately on crop confirm tap.
-
-**Status:** In progress.
-
----
-
-
-## [WiFi] Validate WiFi connection logic across all scenarios — no loopholes
-
-**Repro:** Not described. Audit all WiFi scenarios end-to-end and verify no silent failures or gaps:
-- **Initial setup** — Pi connects to home WiFi for first time via `plink.sh`
-- **AP mode → client mode** — after user enters WiFi creds in hotspot UI, does it reliably switch back?
-- **Network loss** — Pi loses WiFi mid-session, does it reconnect or hang?
-- **Known network priority** — multiple saved networks, which wins?
-- **Tailscale + WiFi** — does Tailscale survive a WiFi reconnect?
-- **Static IP conflicts** — if `192.168.1.50` is taken, what happens?
-- **wpa_supplicant vs nmcli** — both touch network config; any race conditions?
-
-**Root cause:** Partially investigated.
-
-**Status:** In progress.
-
----
-
 
 ## [SoftwareUpdate] OTA update of Pi software (webserver, frontend) triggered from mobile app
 
@@ -79,19 +46,6 @@
 - Disable power to non-essential USB ports
 - Disable unused system services (bluetooth, etc.)
 - Replace polling (30s / 8s status interval) with push-based updates (WebSocket or SSE)
-
-**Root cause:** Not investigated.
-
-**Status:** Not investigated.
-
----
-
-## [WiFi] "Switch to X?" confirm dialog shows even when Pi already connected to that network
-
-**Repro:**
-1. Pi connected to Airtel_2A_2.4
-2. Open Choose WiFi — Airtel_2A_2.4 shows "Connected"
-3. Tap Airtel_2A_2.4 → confirm dialog says "Pi will disconnect from its current network and connect to Airtel_2A_2.4"
 
 **Root cause:** Not investigated.
 

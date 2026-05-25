@@ -71,7 +71,16 @@ if [ -f "$FLAG" ]; then
                 CONNECTED=1
                 log "Internet connected after ${i} attempts — restoring display"
                 sudo systemctl restart avahi-daemon
-                CURRENT=$(python3 -c "
+                QUEUE_LEN=$(python3 -c "
+import json
+try:
+    q = json.load(open('$QUEUE'))
+    print(len(q.get('items', [])))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+                if [ "$QUEUE_LEN" -gt 0 ]; then
+                    CURRENT=$(python3 -c "
 import json
 try:
     q = json.load(open('$QUEUE'))
@@ -79,9 +88,12 @@ try:
 except Exception:
     print(0)
 " 2>/dev/null || echo 0)
-                curl -s -X POST http://localhost/api/queue/show \
-                    -H "Content-Type: application/json" \
-                    -d "{\"index\": $CURRENT}" >/dev/null 2>&1
+                    curl -s -X POST http://localhost/api/queue/show \
+                        -H "Content-Type: application/json" \
+                        -d "{\"index\": $CURRENT}" >/dev/null 2>&1
+                else
+                    render_screen default
+                fi
                 break
             else
                 log "Ping attempt $i failed — waiting for WiFi"

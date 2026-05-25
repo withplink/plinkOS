@@ -999,7 +999,7 @@ def api_hotspot_screen():
     try:
         sys.path.insert(0, '/home/pi/PiInk/scripts')
         import show_hotspot_screen as shs
-        img = shs.draw_ap_screen(password) if mode == 'ap' else shs.draw_client_screen()
+        img = shs.draw_ap_screen(password) if mode == 'ap' else shs.draw_default_screen()
         threading.Thread(target=lambda: (
             inky_display.set_image(img), inky_display.show()
         ), daemon=True).start()

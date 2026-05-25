@@ -34,6 +34,8 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 - `pi-scripts/setup-remote.sh` → remote setup over SSH (called by `plink.sh`, has spinner UI)
 - `pi-scripts/reset.sh` → resets Pi to pre-install state
 - `pi-scripts/backfill_eink.py` → re-processes all queue items through the current e-ink pipeline (run on Pi after pipeline changes)
+- `pi-scripts/scripts/show_hotspot_screen.py` → renders AP QR screen (`draw_ap_screen`) or empty-queue placeholder (`draw_default_screen`); called via `/api/hotspot/screen`
+- `pi-scripts/scripts/toggle_hotspot.sh` → toggles between AP and client mode; on switch-back, shows current queue item if queue non-empty, else calls `render_screen default`
 - `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Reset/Push menu)
 
 ### Setup Script UX
@@ -157,7 +159,7 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 | `POST` | `/api/wifi` | `{ssid, password?}` — write creds, trigger hotspot→client switch after 2s |
 | `GET/POST` | `/share-target` | Web Share Target receiver; accepts shared photos from OS share sheet |
 | `POST` | `/api/wifi/switch` | Switch WiFi while in client mode (no hotspot toggle): `{ssid, password?}` |
-| `POST` | `/api/hotspot/screen` | Render AP or client screen to e-ink: `{mode: 'ap'|'client', password?}` |
+| `POST` | `/api/hotspot/screen` | Render AP or default screen to e-ink: `{mode: 'ap'|'default', password?}` |
 | `GET` | `/api/tailscale/status` | `{state: 'running'|'stopped', ip, url}` |
 | `POST` | `/api/tailscale/connect` | Start Tailscale; returns auth URL if not yet authenticated |
 | `POST` | `/api/tailscale/disconnect` | `tailscale logout` |

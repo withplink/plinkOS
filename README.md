@@ -23,7 +23,7 @@ Send a moment to your plink.
 - Swipe-to-dismiss sheets with spring animations
 - E-Ink Enhance — Spectra 6 palette quantization with Floyd-Steinberg dithering applied at upload time; toggle from the iOS app
 - Device controls: rotate display, clear ghosting, reboot, shutdown
-- Hotspot/AP mode — Pi broadcasts `plink-setup` Wi-Fi for initial provisioning
+- Hotspot/AP mode — Pi broadcasts `plink-setup` Wi-Fi for initial provisioning; shows "Ready" screen after connecting, or resumes queue if photos exist
 - Online/offline status dot — auto-detects connectivity, shows local URL hint when on Tailscale and Pi is unreachable
 
 ## Hardware

@@ -3,7 +3,7 @@
 Renders a status screen on the Inky Impression 7.3" display.
 Usage:
   python3 show_hotspot_screen.py ap <password>   — show AP mode screen with QR code
-  python3 show_hotspot_screen.py client          — show "reconnecting" screen
+  python3 show_hotspot_screen.py default         — show empty-queue placeholder screen
 """
 
 import sys
@@ -100,15 +100,13 @@ def draw_ap_screen(password: str) -> Image.Image:
     return img
 
 
-def draw_client_screen() -> Image.Image:
+def draw_default_screen() -> Image.Image:
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
     font_title = make_font(FONT_BOLD_PATH, 38)
     font_body = make_font(FONT_PATH, 22)
-    draw.text((40, 36), "Reconnecting to WiFi…", font=font_title, fill="black")
-    draw.text((40, 100), "The frame is leaving hotspot mode and", font=font_body, fill="#444444")
-    draw.text((40, 130), "rejoining your home network.", font=font_body, fill="#444444")
-    draw.text((40, 180), "Open Plink — it will reconnect automatically.", font=font_body, fill="#666666")
+    draw.text((40, 36), "Ready", font=font_title, fill="black")
+    draw.text((40, 100), "Open Plink and upload your first photo.", font=font_body, fill="#444444")
     return img
 
 
@@ -124,9 +122,9 @@ def show(img: Image.Image):
 
 
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "client"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "default"
     if mode == "ap":
         password = sys.argv[2] if len(sys.argv) > 2 else "plink123"
         show(draw_ap_screen(password))
     else:
-        show(draw_client_screen())
+        show(draw_default_screen())
