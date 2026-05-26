@@ -1,15 +1,3 @@
-## [I2C-EEPROM] I²C not enabled on Pi GPIO — EEPROM variant detection unavailable
-
-**Repro:** `/dev/i2c-1` is missing on Pi Zero 2W. Only `/dev/i2c-2` (HDMI DDC) exists. The Inky library reads the display EEPROM via `/dev/i2c-1` to identify the panel variant (e.g., Spectra 6 vs 7-Colour). Without it, `inky_display.eeprom` is `None` and model detection falls back to resolution-based guess.
-
-**Root cause:** I²C not enabled on the 40-pin GPIO header. Needs `dtparam=i2c_arm=on` in `/boot/config.txt` (or `raspi-config` → Interface Options → I²C → Enable).
-
-**Fix:** Enable I²C, verify `/dev/i2c-1` appears, confirm `i2cdetect -y 1` shows device at `0x50` (the EEPROM address). The server already probes bus 2 then 1 then 0, so it'll pick up the correct bus once enabled.
-
-**Status:** ⚪ Not investigated.
-
----
-
 ## [Onboarding] E-ink stays on QR screen after WiFi provisioning with empty queue
 
 **Repro:**

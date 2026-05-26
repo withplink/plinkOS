@@ -22,16 +22,7 @@ E-ink state screens — design and wire up images for all Pi lifecycle states.
 | 3 | AP mode / WiFi setup (after long-press A) | Existing `draw_ap_screen()` — needs polish |
 | 4 | Connected, empty queue | ✅ great_wave_retro deployed |
 
-## EinkProcessor (prior session, needs panel test)
-
-Bayer 8×8 dithering replaces Floyd-Steinberg in `EinkProcessor.swift`:
-- Two-palette system: saturated primaries for quantize bucket assignment, actual Spectra 6 colors for output
-- Preprocessing: brightness +0.08, saturation ×1.4, contrast ×1.15, unsharp radius 1.5/0.9, Bayer threshold 12
-- Warm golden-hour tones should dither red+yellow instead of collapsing to grey-brown
-- **Not yet panel-tested** — needs rebuild + real-world display test
-
 ## Next Steps
 
 - Generate images for screens 1 and 2 (see `[DefaultScreen]` issue for specs)
 - Implement `[BootNoWiFi]` — detect no-WiFi state on boot and call `render_screen default` or a new prompt screen
-- Panel-test EinkProcessor Bayer dithering (upload warm-tone photo, observe at ~1m)
