@@ -153,6 +153,34 @@ prompt_pi_creds() {
   export PI_USER PI_HOST PI_PASS
 }
 
+prompt_display_model() {
+  local conf="$SCRIPT_DIR/displays.conf"
+  local displays=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^#|^[[:space:]]*$ ]] && continue
+    displays+=("$line")
+  done < "$conf"
+
+  echo "Which display is installed on your frame?"
+  echo ""
+  local i=1
+  for display in "${displays[@]}"; do
+    if [ $i -eq 1 ]; then
+      printf "  ${BOLD}%d.${NC} %s  ${DIM}(default)${NC}\n" $i "$display"
+    else
+      printf "  ${BOLD}%d.${NC} %s\n" $i "$display"
+    fi
+    i=$((i + 1))
+  done
+  echo ""
+  tty_read "  Choice [1]: " _display_choice
+  _display_choice="${_display_choice:-1}"
+  local idx=$((_display_choice - 1))
+  DISPLAY_MODEL="${displays[$idx]:-${displays[0]}}"
+  export DISPLAY_MODEL
+  echo ""
+}
+
 do_install() {
   if is_pi; then
     # ── On Pi ──
@@ -175,6 +203,7 @@ do_install() {
       prompt_pi_creds
       ssh-keygen -R "$PI_HOST" >/dev/null 2>&1 || true
     fi
+    prompt_display_model
     bash "$SCRIPT_DIR/pi-scripts/setup-remote.sh" "$@"
     [ -n "${TMP_DIR:-}" ] && rm -rf "$TMP_DIR"
   fi

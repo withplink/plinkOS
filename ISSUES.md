@@ -1,3 +1,15 @@
+## [I2C-EEPROM] I²C not enabled on Pi GPIO — EEPROM variant detection unavailable
+
+**Repro:** `/dev/i2c-1` is missing on Pi Zero 2W. Only `/dev/i2c-2` (HDMI DDC) exists. The Inky library reads the display EEPROM via `/dev/i2c-1` to identify the panel variant (e.g., Spectra 6 vs 7-Colour). Without it, `inky_display.eeprom` is `None` and model detection falls back to resolution-based guess.
+
+**Root cause:** I²C not enabled on the 40-pin GPIO header. Needs `dtparam=i2c_arm=on` in `/boot/config.txt` (or `raspi-config` → Interface Options → I²C → Enable).
+
+**Fix:** Enable I²C, verify `/dev/i2c-1` appears, confirm `i2cdetect -y 1` shows device at `0x50` (the EEPROM address). The server already probes bus 2 then 1 then 0, so it'll pick up the correct bus once enabled.
+
+**Status:** ⚪ Not investigated.
+
+---
+
 ## [Onboarding] E-ink stays on QR screen after WiFi provisioning with empty queue
 
 **Repro:**
@@ -10,21 +22,27 @@
 
 **Fix:** `toggle_hotspot.sh` now checks queue length on switch-back. Empty queue → `render_screen default` (shows "Ready / Open Plink to upload your first photo"). Non-empty → `/api/queue/show` with current index as before. `draw_client_screen` removed; replaced by `draw_default_screen` in `show_hotspot_screen.py`.
 
-**Status:** Fix implemented, pending test.
+**Status:** 🟡 Fix implemented, pending test.
 
 ---
 
 
 
-## [DefaultScreen] Better default screen when Pi is connected to WiFi with empty queue
+## [DefaultScreen] Full set of e-ink state screens
 
-**Repro:**
-1. Pi connected to WiFi, queue is empty
-2. E-ink shows a plain text "Ready / Open Plink to upload your first photo" placeholder
+4 screens needed across the Pi lifecycle:
 
-**Root cause:** No designed default screen exists. Current placeholder is minimal text via `draw_default_screen()` in `show_hotspot_screen.py`.
+1. **Unbox / powered-off** — e-ink retains last image when Pi is off; needs a welcome/brand image written to display during first install so the frame looks good out of the box.
+2. **Boot, no WiFi configured** — Pi booted, no queue, no WiFi; prompts user to onboard ("Hold A to begin setup").
+3. **AP mode / WiFi setup** — shown after long-press A; displays QR code + credentials so user can connect phone and enter WiFi. Existing `draw_ap_screen()` covers this.
+4. **Connected, empty queue** — Pi on WiFi, no photos yet; `draw_default_screen()` now loads `great_wave_retro.png` (✅ done).
 
-**Status:** Not investigated.
+**Notes:**
+- State 2: install already writes a default image to e-ink (`default_screen.png`). Image is generic — doesn't tell user to press A. Need new onboarding image + code path on boot that detects no-WiFi and renders it. AP screen still shows after long-press A as before.
+
+**Root cause:** No designed images for states 1, 2. State 3 functional but unpolished. State 4 done.
+
+**Status:** 🔵 In progress — state 4 done (great_wave_retro). States 1, 2 need images; state 3 needs polish.
 
 ---
 
@@ -34,7 +52,7 @@
 
 **Root cause:** Not investigated.
 
-**Status:** Not investigated.
+**Status:** ⚪ Not investigated.
 
 ---
 
@@ -49,7 +67,7 @@
 
 **Root cause:** Not investigated.
 
-**Status:** Not investigated.
+**Status:** ⚪ Not investigated.
 
 ---
 
@@ -59,6 +77,6 @@
 
 **Root cause:** Not investigated.
 
-**Status:** Not investigated.
+**Status:** ⚪ Not investigated.
 
 ---

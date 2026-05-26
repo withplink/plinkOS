@@ -98,14 +98,21 @@ step "Upload hotspot screen" \
 step "Upload hotspot toggle" \
   "$SCP pi-scripts/scripts/toggle_hotspot.sh '$HOST:/home/pi/PiInk/scripts/toggle_hotspot.sh'"
 
-step "Upload backfill script" \
-  "$SCP pi-scripts/backfill_eink.py '$HOST:/home/pi/PiInk/scripts/backfill_eink.py'"
-
 step "Upload resize script" \
   "$SCP pi-scripts/resize_images.py '$HOST:/home/pi/PiInk/scripts/resize_images.py'"
 
+step "Create assets dir on Pi" \
+  "$SSH 'mkdir -p /home/pi/PiInk/assets'"
+
+step "Upload default screen asset" \
+  "$SCP pi-scripts/assets/default_screen.png '$HOST:/home/pi/PiInk/assets/default_screen.png'"
+
 # ── Phase 2: Restart ──
 section "2/2" "Restarting frame"
+
+DISPLAY_MODEL="${DISPLAY_MODEL:-Inky Impression 7.3\"}"
+step "Set display model ($DISPLAY_MODEL)" \
+  "$SSH \"echo '$PI_PASS' | sudo -S bash -c 'mkdir -p /etc/systemd/system/piink.service.d && printf \\\"[Service]\\\\nEnvironment=DISPLAY_MODEL=$DISPLAY_MODEL\\\\n\\\" > /etc/systemd/system/piink.service.d/display.conf && systemctl daemon-reload'\""
 
 step "Restart piink service" \
   "$SSH \"echo '$PI_PASS' | sudo -S systemctl restart piink\""

@@ -8,10 +8,24 @@ import json
 from inky.inky_e673 import Inky
 import RPi.GPIO as GPIO
 
+def _make_i2c_bus():
+    for bus in [2, 1, 0]:
+        if os.path.exists(f'/dev/i2c-{bus}'):
+            try:
+                import smbus2
+                return smbus2.SMBus(bus)
+            except Exception:
+                return None
+    return None
+
 inky_display = Inky(
     resolution=(800, 480),
-    colour="multi"
+    colour="multi",
+    i2c_bus=_make_i2c_bus()
 )
+
+def get_display_model():
+    return os.environ.get("DISPLAY_MODEL", "Inky Impression 7.3\"")
 
 from PIL import ImageDraw, Image, ImageEnhance, ImageFilter, ImageOps
 BUTTON_A = 5
@@ -150,40 +164,6 @@ def _get_output_palette():
         _SPECTRA6_OUTPUT_PALETTE = flat + [0] * (768 - len(flat))
     return _SPECTRA6_OUTPUT_PALETTE
 
-def process_for_eink(src_path, dst_path):
-    try:
-        img = Image.open(src_path).convert('RGB')
-        img = ImageOps.autocontrast(img, cutoff=1)
-        img = ImageEnhance.Contrast(img).enhance(1.2)
-        img = ImageEnhance.Color(img).enhance(1.3)
-        img = img.filter(ImageFilter.UnsharpMask(radius=0.8, percent=80, threshold=3))
-
-        # Quantize with saturated primaries (PIL C-level, ~0.1s) then remap to actual ink colors
-        quantized = img.quantize(palette=_get_quantize_palette(), dither=Image.Dither.FLOYDSTEINBERG)
-        quantized.putpalette(_get_output_palette())
-        quantized.convert('RGB').save(dst_path, 'JPEG', quality=95)
-    except Exception as e:
-        print(f"process_for_eink error: {e}")
-
-def get_eink_enhance():
-    try:
-        with open(os.path.join(PATH, "config/settings.json")) as f:
-            return json.load(f).get("eink_enhance", True)
-    except Exception:
-        return True
-
-def save_eink_enhance(val):
-    settings_path = os.path.join(PATH, "config/settings.json")
-    try:
-        with open(settings_path) as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-    data["eink_enhance"] = bool(val)
-    os.makedirs(os.path.join(PATH, "config"), exist_ok=True)
-    with open(settings_path, "w") as f:
-        json.dump(data, f)
-
 def compress_image(filepath, max_size=(800, 480), quality=90):
     try:
         img = Image.open(filepath).convert('RGB')
@@ -280,7 +260,7 @@ def api_status():
         if q["items"]:
             cur = q.get("current", 0) % len(q["items"])
             item = q["items"][cur]
-            fname = item.get("display_filename") if (get_eink_enhance() and item.get("display_filename")) else item["filename"]
+            fname = item["filename"]
             fpath = os.path.join(app.config['UPLOAD_FOLDER'], fname)
             if os.path.isfile(fpath):
                 image_url = '/uploads/' + fname
@@ -307,7 +287,7 @@ def api_status():
         ap_mode = os.path.exists('/tmp/plink_ap_mode')
 
     return app.response_class(
-        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering, 'ap_mode': ap_mode, 'eink_enhance': get_eink_enhance()}),
+        json.dumps({'wifi': wifi, 'uptime': uptime, 'image_url': image_url, 'orientation': orientation, 'busy': _is_rendering, 'ap_mode': ap_mode, 'model': get_display_model()}),
         mimetype='application/json'
     )
 
@@ -326,15 +306,7 @@ def api_upload():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             compress_image(filepath)
-            disp_filename = None
-            disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
-            disp_filename_candidate = disp_ts + secure_filename(file.filename)
-            disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
-            process_for_eink(filepath, disp_filepath)
-            if os.path.isfile(disp_filepath):
-                disp_filename = disp_filename_candidate
-            show_fname = disp_filename if (disp_filename and get_eink_enhance()) else filename
-            updateEink(show_fname, orientation, True)
+            updateEink(filename, orientation, True)
             return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename}), mimetype='application/json')
         else:
             return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
@@ -370,9 +342,6 @@ def api_action():
         with Image.open(fpath) as img:
             rotated = img.rotate(-90, Image.NEAREST, expand=1)
             rotated.save(fpath)
-        disp_fp = item.get("display_filename")
-        if disp_fp:
-            process_for_eink(fpath, os.path.join(app.config['UPLOAD_FOLDER'], disp_fp))
         threading.Thread(target=_show_queue_item, args=(q, q["current"]), daemon=True).start()
         return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + fname}), mimetype='application/json')
 
@@ -388,8 +357,6 @@ def api_settings():
         vert  = '' if orientation == 'landscape' else 'checked'
         _, _, ar = loadSettings()
         saveSettings(horiz, vert, ar)
-        if 'eink_enhance' in data:
-            save_eink_enhance(bool(data['eink_enhance']))
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
@@ -409,6 +376,8 @@ def _set_rendering(val):
     global _is_rendering
     with _render_lock:
         _is_rendering = val
+    import time as _time
+    print(f"[piink] _is_rendering={val} at {_time.time():.3f}", flush=True)
 
 def load_queue():
     try:
@@ -428,13 +397,7 @@ def _show_queue_item(q, idx):
     item = q["items"][idx % len(q["items"])]
     _, horiz, _ = loadSettings()
     orientation = 0 if horiz == "checked" else 1
-    fname = None
-    if get_eink_enhance():
-        disp = item.get("display_filename")
-        if disp and os.path.isfile(os.path.join(app.config['UPLOAD_FOLDER'], disp)):
-            fname = disp
-    if not fname:
-        fname = item["filename"]
+    fname = item["filename"]
     try:
         updateEink(fname, orientation, True)
     except Exception as e:
@@ -488,8 +451,12 @@ def api_queue_get():
 
 @app.route('/api/queue/add', methods=['POST'])
 def api_queue_add():
+    import time as _time
+    _t0 = _time.time()
     try:
         label = request.form.get('label', '')
+        content_len = request.content_length or 0
+        print(f"[piink] api_queue_add start content_length={content_len//1024}KB show_now={request.form.get('show_now')}", flush=True)
         if 'file' in request.files and request.files['file'].filename:
             file = request.files['file']
             if not allowed_file(file.filename):
@@ -498,7 +465,9 @@ def api_queue_add():
             filename = ts + secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
+            _t1 = _time.time()
             compress_image(filepath)
+            print(f"[piink] file saved+compressed in {_time.time()-_t1:.2f}s", flush=True)
         else:
             return app.response_class(json.dumps({'error': 'No file provided'}), status=400, mimetype='application/json')
 
@@ -510,34 +479,13 @@ def api_queue_add():
                 orig_filename = orig_ts + secure_filename(orig_file.filename)
                 orig_filepath = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
                 orig_file.save(orig_filepath)
-                compress_image(orig_filepath, max_size=(1600, 960))
-
-        disp_filename = None
-        if 'processed' in request.files and request.files['processed'].filename:
-            proc_file = request.files['processed']
-            if allowed_file(proc_file.filename):
-                proc_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
-                disp_filename_candidate = proc_ts + secure_filename(proc_file.filename)
-                disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
-                proc_file.save(disp_filepath)
-                compress_image(disp_filepath, max_size=(1600, 960))
-                disp_filename = disp_filename_candidate
-        else:
-            # fallback: Pi-side processing for PWA / web-share uploads
-            disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
-            disp_filename_candidate = disp_ts + secure_filename(file.filename)
-            disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
-            process_for_eink(filepath, disp_filepath)
-            if os.path.isfile(disp_filepath):
-                disp_filename = disp_filename_candidate
+                threading.Thread(target=compress_image, args=(orig_filepath,), kwargs={'max_size': (1600, 960)}, daemon=True).start()
 
         show_now = request.form.get('show_now') == '1'
         crop_meta_str = request.form.get('crop_meta')
         item = {"filename": filename, "label": label or filename, "added_at": datetime.now().isoformat()}
         if orig_filename:
             item["orig_filename"] = orig_filename
-        if disp_filename:
-            item["display_filename"] = disp_filename
         if crop_meta_str:
             try:
                 item["crop_meta"] = json.loads(crop_meta_str)
@@ -564,6 +512,7 @@ def api_queue_add():
             threading.Thread(target=_show_queue_item, args=(q, new_idx), daemon=True).start()
 
         _schedule_rotate()
+        print(f"[piink] api_queue_add done in {_time.time()-_t0:.2f}s show_now={show_now}", flush=True)
         return app.response_class(json.dumps({'ok': True, 'image_url': '/uploads/' + filename, 'queue': q, 'new_idx': new_idx}), mimetype='application/json')
     except Exception as e:
         return app.response_class(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
@@ -666,26 +615,9 @@ def api_queue_replace():
                 orig_filename = orig_ts + secure_filename(orig_file.filename)
                 orig_filepath = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
                 orig_file.save(orig_filepath)
-                compress_image(orig_filepath, max_size=(1600, 960))
+                threading.Thread(target=compress_image, args=(orig_filepath,), kwargs={'max_size': (1600, 960)}, daemon=True).start()
 
-        disp_filename = None
-        if 'processed' in request.files and request.files['processed'].filename:
-            proc_file = request.files['processed']
-            if allowed_file(proc_file.filename):
-                proc_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
-                disp_filename_candidate = proc_ts + secure_filename(proc_file.filename)
-                disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
-                proc_file.save(disp_filepath)
-                compress_image(disp_filepath, max_size=(1600, 960))
-                disp_filename = disp_filename_candidate
-        else:
-            # fallback: Pi-side processing for PWA / web-share uploads
-            disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
-            disp_filename_candidate = disp_ts + secure_filename(file.filename)
-            disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
-            process_for_eink(filepath, disp_filepath)
-            if os.path.isfile(disp_filepath):
-                disp_filename = disp_filename_candidate
+        # No display processing — original image used everywhere
 
         # Delete old files
         old_fp = os.path.join(app.config['UPLOAD_FOLDER'], old_item["filename"])
@@ -710,8 +642,6 @@ def api_queue_replace():
         }
         if orig_filename:
             new_item["orig_filename"] = orig_filename
-        if disp_filename:
-            new_item["display_filename"] = disp_filename
         if crop_meta_str:
             try:
                 new_item["crop_meta"] = json.loads(crop_meta_str)
@@ -1079,25 +1009,10 @@ def api_tailscale_connect():
     with open(log_file, 'w') as f:
         subprocess.Popen(['sudo', 'tailscale', 'up'], stdout=f, stderr=subprocess.STDOUT)
 
-    url_pat = re.compile(r'https://login\.tailscale\.com\S+')
-    deadline = time.time() + 45
-    while time.time() < deadline:
-        try:
-            content = open(log_file).read()
-            m = url_pat.search(content)
-            if m:
-                return app.response_class(
-                    json.dumps({'ok': True, 'state': 'auth_required', 'auth_url': m.group().rstrip('.')}),
-                    mimetype='application/json'
-                )
-        except OSError:
-            pass
-        time.sleep(0.5)
-
     return app.response_class(
-        json.dumps({'ok': False, 'error': 'Timed out waiting for auth URL'}),
+        json.dumps({'ok': True, 'state': 'starting'}),
         mimetype='application/json'
-    ), 500
+    )
 
 
 @app.route('/api/tailscale/status', methods=['GET'])
@@ -1123,6 +1038,19 @@ def api_tailscale_status():
             )
     except Exception:
         pass
+
+    url_pat = re.compile(r'https://login\.tailscale\.com\S+')
+    try:
+        content = open('/tmp/tailscale-auth.log').read()
+        m = url_pat.search(content)
+        if m:
+            return app.response_class(
+                json.dumps({'ok': True, 'state': 'auth_required', 'auth_url': m.group().rstrip('.')}),
+                mimetype='application/json'
+            )
+    except OSError:
+        pass
+
     return app.response_class(
         json.dumps({'ok': True, 'state': 'stopped', 'ip': None}),
         mimetype='application/json'
@@ -1177,13 +1105,13 @@ def saveSettings(orientationHorizontal,orientationVertical,adjustAR):
         json.dump(jsonStr, f)
 
 def updateEink(filename, orientation, adjustAR, _manage_busy=True):
-    if _manage_busy:
-        _set_rendering(True)
     try:
         with Image.open(os.path.join(PATH, "img/", filename)) as img:
             img = changeOrientation(img, orientation)
             img = adjustAspectRatio(img, adjustAR)
             inky_display.set_image(img)
+            if _manage_busy:
+                _set_rendering(True)
             inky_display.show()
     finally:
         if _manage_busy:
@@ -1237,9 +1165,6 @@ def rotateImage(deg):
     with Image.open(os.path.join(PATH, "img/", filename)) as img:
         img = img.rotate(deg, Image.NEAREST, expand=1)
         img.save(os.path.join(PATH, "img/", filename))
-    disp_fp = item.get("display_filename")
-    if disp_fp:
-        process_for_eink(os.path.join(PATH, "img/", filename), os.path.join(app.config['UPLOAD_FOLDER'], disp_fp))
     _show_queue_item(q, q["current"])
 
 @app.route('/uploads/<filename>')
@@ -1346,17 +1271,7 @@ def share_target():
                 compress_image(filepath)
                 label = file.filename.rsplit('.', 1)[0]
 
-                disp_filename = None
-                disp_ts = datetime.now().strftime('%Y%m%d_%H%M%S_display_')
-                disp_filename_candidate = disp_ts + secure_filename(file.filename)
-                disp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], disp_filename_candidate)
-                process_for_eink(filepath, disp_filepath)
-                if os.path.isfile(disp_filepath):
-                    disp_filename = disp_filename_candidate
-
                 item = {"filename": filename, "label": label, "added_at": datetime.now().isoformat()}
-                if disp_filename:
-                    item["display_filename"] = disp_filename
                 q["items"].append(item)
                 new_idx = len(q["items"]) - 1
                 was_empty = new_idx == 0

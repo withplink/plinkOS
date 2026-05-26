@@ -25,6 +25,10 @@ Plink is a two-repo project. Both repos are always in scope regardless of which 
 
 Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impression 7.3" e-ink display. Send photos to the frame from your phone.
 
+## Testing doc
+
+After any fix or change to the Pi server, check `/Users/shoaibahmed/code/personal/Plink/TESTING.md` section **"13. Pi Server (pi-ink)"** and update or add test coverage for the changed functionality if not already present.
+
 ## Key Files
 
 - `webserver_new.py` → deployed to `/home/pi/PiInk/src/webserver.py` (Flask backend)
@@ -33,7 +37,6 @@ Mobile-first PWA companion app for a Raspberry Pi Zero 2W driving an Inky Impres
 - `pi-scripts/setup-local.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
 - `pi-scripts/setup-remote.sh` → remote setup over SSH (called by `plink.sh`, has spinner UI)
 - `pi-scripts/reset.sh` → resets Pi to pre-install state
-- `pi-scripts/backfill_eink.py` → re-processes all queue items through the current e-ink pipeline (run on Pi after pipeline changes)
 - `pi-scripts/scripts/show_hotspot_screen.py` → renders AP QR screen (`draw_ap_screen`) or empty-queue placeholder (`draw_default_screen`); called via `/api/hotspot/screen`
 - `pi-scripts/scripts/toggle_hotspot.sh` → toggles between AP and client mode; on switch-back, shows current queue item if queue non-empty, else calls `render_screen default`
 - `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Reset/Push menu)
@@ -69,9 +72,17 @@ sshpass -p '<password>' ssh pi@pi.local "echo '<password>' | sudo -S systemctl r
 
 ## Display Driver — CRITICAL
 
-- **Controller:** Spectra 6 (E673), identified via EEPROM on the display
+- **Controller:** Spectra 6 (E673) — uses E673 chip, not AC073TC1A
 - **Python import:** `from inky.inky_e673 import Inky`
 - **NOT** `inky_ac073tc1a` — that's for older 7.3" revisions; using it causes `show()` to silently fail (no error, but display doesn't update)
+- **EEPROM is None** on Spectra 6 — I2C bus has no devices; EEPROM-based auto-detect does not work
+
+## Display Model (shown in iOS app)
+
+- `get_display_model()` reads `DISPLAY_MODEL` env var from the systemd service — plain human-readable string e.g. `"Inky Impression 7.3\"`
+- Written into `/etc/systemd/system/piink.service` during `setup-remote.sh`
+- **Single source of truth:** `displays.conf` in repo root — one display name per line; `plink.sh` reads it and presents numbered picker during install
+- Adding a new display = add one line to `displays.conf`; nothing else to change
 
 ### Required boot config (`/boot/firmware/config.txt`)
 
@@ -116,40 +127,25 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 
 ## Queue System
 
-- `/home/pi/PiInk/config/queue.json`: `{items:[{filename, label, added_at, orig_filename?, display_filename?}], current:0, interval:0}`
+- `/home/pi/PiInk/config/queue.json`: `{items:[{filename, label, added_at, orig_filename?}], current:0, interval:0}`
 - `orig_filename` — pre-crop original; stored when uploaded via `/api/queue/replace`
-- `display_filename` — Spectra 6 e-ink-processed JPEG; generated at upload time by `process_for_eink()`
-- `_show_queue_item` uses `display_filename` when `eink_enhance=true`, falls back to `filename`
 - Filenames prefixed with timestamp (`YYYYMMDD_HHMMSS_`) to avoid collisions
 - `threading.Timer` + `threading.Lock` for auto-rotate; `_queue_lock` guards `api_queue_add` writes for thread safety
 - When queue becomes empty, keep the last file on disk (still showing on e-ink)
-
-## E-Ink Enhancement Pipeline
-
-- `compress_image(filepath, max_size=(800,480), quality=90)` — shrinks uploads before display; orig/replace files use `max_size=(1600,960)` explicitly
-- `process_for_eink(src_path, dst_path)` — PIL-only pipeline:
-  1. `ImageOps.autocontrast(cutoff=1)` + contrast ×1.2 + color saturation ×1.3 + unsharp mask
-  2. `img.quantize(palette=_get_quantize_palette(), dither=FLOYDSTEINBERG)` — quantizes against **saturated** primaries (`_SPECTRA6_SATURATED`) for better color bucket assignment
-  3. `quantized.putpalette(_get_output_palette())` — remaps to actual Spectra 6 ink colors (`_SPECTRA6_COLORS`)
-  4. Converts back to RGB, saves as JPEG quality=95
-- `_SPECTRA6_COLORS` = `[(0,0,0),(255,255,255),(160,32,32),(240,224,80),(96,128,80),(80,128,184)]`
-- `_SPECTRA6_SATURATED` = saturated primaries used only for quantize bucket assignment, not output
-- `get_eink_enhance()` / `save_eink_enhance(val)` — read/write `eink_enhance` key in `settings.json`
-- Toggle in iOS SettingsTab → POSTs `eink_enhance` to `/api/settings` → server re-displays current item
 
 ## Key API Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/status` | `{wifi, uptime, image_url, orientation, busy, ap_mode, eink_enhance}` |
+| `GET` | `/api/status` | `{wifi, uptime, image_url, orientation, busy, ap_mode, model}` |
 | `POST` | `/api/upload` | Multipart file upload; shows immediately or adds to queue |
 | `POST` | `/api/action` | `{action}`: `rotate`, `clear_ghost`, `reboot`, `shutdown` |
 | `POST` | `/api/settings` | Save orientation/aspect-ratio settings |
 | `GET` | `/api/queue` | Full queue state |
-| `POST` | `/api/queue/add` | Add item to queue (multipart: `file`, `label?`, `show_now?`, optional `processed` pre-rendered e-ink JPEG) |
+| `POST` | `/api/queue/add` | Add item to queue (multipart: `file`, `label?`, `show_now?`) |
 | `POST` | `/api/queue/remove` | Remove item by index |
 | `POST` | `/api/queue/reorder` | Reorder items |
-| `POST` | `/api/queue/replace` | Replace item at index (multipart: `index`, `file`, optional `original`, optional `processed` pre-rendered e-ink JPEG) |
+| `POST` | `/api/queue/replace` | Replace item at index (multipart: `index`, `file`, optional `original`) |
 | `POST` | `/api/queue/next` | Advance to next item |
 | `POST` | `/api/queue/show` | Jump to item by index |
 | `POST` | `/api/queue/interval` | Set auto-rotate interval in minutes |

@@ -189,6 +189,7 @@ ExecStart=/usr/bin/python3 /home/pi/PiInk/src/webserver.py
 WorkingDirectory=/home/pi/PiInk/src
 User=pi
 Environment=PYTHONPATH=/home/pi/.local/lib/python3.13/site-packages
+Environment=DISPLAY_MODEL=${DISPLAY_MODEL:-Inky Impression 7.3\"}
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=5
