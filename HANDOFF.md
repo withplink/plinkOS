@@ -2,23 +2,25 @@
 
 ## Goal
 
-iOS app upload flow polish: unified dark glass progress modal, no success toasts, correct state labels across all upload paths (new send, queue add, recrop).
+E-ink state screens — design and wire up images for all Pi lifecycle states.
 
 ## Current State
 
-### iOS (Plink) — completed this session
+### pi-ink — this session
 
-- `TransferProgressModal` replaces `PreparingMediaView` as the upload overlay. Five states: `.preparing` → `.optimizing` / `.sending` → `.refreshing` → `.done`. Dark glass aesthetic, circular progress ring, spring entrance.
-- Upload paths (`upload()`, `replaceQueueItem()`, `performAdd`) now batch `cancelPreparingMedia + setLoading` in single `MainActor.run` to prevent visual gap between preparing overlay clearing and progress modal appearing.
-- Success toasts removed from `upload()` and `replaceQueueItem()` — `.done` modal state provides haptic + visual confirmation.
-- Recrop/replace path shows "Updating display…" the whole time (not "Sending to frame…").
-- Queue-add path shows "Adding to queue…" (not "Optimizing…").
+- `draw_default_screen()` in `show_hotspot_screen.py` now loads `/home/pi/PiInk/assets/default_screen.png` (resized to 800×480 via LANCZOS); falls back to text placeholder if file missing.
+- `great_wave_retro.png` copied to `pi-scripts/assets/default_screen.png` and deployed to Pi at `/home/pi/PiInk/assets/default_screen.png`.
+- `push.sh` now includes two steps: create `/home/pi/PiInk/assets/` dir on Pi, upload `default_screen.png`.
+- ISSUES.md `[DefaultScreen]` updated to track all 4 screens. `[BootNoWiFi]` issue added.
 
-### Server (pi-ink) — no changes this session
+### 4 e-ink lifecycle screens
 
-- `api_queue_add` and `api_queue_replace` accept optional `processed` multipart field; stored as `display_filename`.
-- `process_for_eink()` runs server-side for non-iOS uploads (web share target).
-- `_show_queue_item` prefers `display_filename` when `eink_enhance=on`.
+| # | State | Status |
+|---|-------|--------|
+| 1 | Unbox / Pi powered off | Image needed |
+| 2 | Boot, no WiFi configured | Image + code needed (`[BootNoWiFi]`) |
+| 3 | AP mode / WiFi setup (after long-press A) | Existing `draw_ap_screen()` — needs polish |
+| 4 | Connected, empty queue | ✅ great_wave_retro deployed |
 
 ## EinkProcessor (prior session, needs panel test)
 
@@ -28,9 +30,8 @@ Bayer 8×8 dithering replaces Floyd-Steinberg in `EinkProcessor.swift`:
 - Warm golden-hour tones should dither red+yellow instead of collapsing to grey-brown
 - **Not yet panel-tested** — needs rebuild + real-world display test
 
-## Next Step
+## Next Steps
 
-Build and deploy iOS app to device. Upload golden-hour warm-tone photo. Observe on panel at ~1m:
-- Smooth surfaces (skin, background): less grainy/muddy than before
-- Warm tones: red+yellow dithering instead of grey-brown
-- If crosshatch still visible: lower `bayerThreshold` (try 8). If too posterized: raise (try 15).
+- Generate images for screens 1 and 2 (see `[DefaultScreen]` issue for specs)
+- Implement `[BootNoWiFi]` — detect no-WiFi state on boot and call `render_screen default` or a new prompt screen
+- Panel-test EinkProcessor Bayer dithering (upload warm-tone photo, observe at ~1m)

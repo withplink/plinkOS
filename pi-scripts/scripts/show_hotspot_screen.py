@@ -100,7 +100,16 @@ def draw_ap_screen(password: str) -> Image.Image:
     return img
 
 
+DEFAULT_SCREEN_PATH = "/home/pi/PiInk/assets/default_screen.png"
+
+
 def draw_default_screen() -> Image.Image:
+    try:
+        img = Image.open(DEFAULT_SCREEN_PATH).convert("RGB")
+        img = img.resize((W, H), Image.LANCZOS)
+        return img
+    except Exception:
+        pass
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
     font_title = make_font(FONT_BOLD_PATH, 38)
