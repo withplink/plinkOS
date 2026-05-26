@@ -1,8 +1,10 @@
 #!/bin/bash
-# On boot: if no WiFi profiles saved (NM), or wlan0 fails to get an IP, start AP mode.
+# On boot: if no WiFi profiles saved, show setup prompt screen and wait for user to press A.
+# If profiles exist but wlan0 gets no IP, start AP mode (WiFi misconfigured).
 # Runs once via plink-boot-check.service before piink.service starts.
 
 TOGGLE="/home/pi/PiInk/scripts/toggle_hotspot.sh"
+SCREEN_SCRIPT="/home/pi/PiInk/scripts/show_hotspot_screen.py"
 FLAG="/tmp/plink_ap_mode"
 
 if [ -f "$FLAG" ]; then
@@ -10,11 +12,15 @@ if [ -f "$FLAG" ]; then
     exit 0
 fi
 
-# Check if any wifi profiles exist in NetworkManager
-WIFI_PROFILES=$(nmcli -t -f TYPE connection show | grep -c '^802-11-wireless$' 2>/dev/null || echo 0)
+# Any connection named plink-rescue* is excluded from profile count so setup screen still shows.
+# Check if any wifi profiles exist in NetworkManager (excluding rescue profile)
+WIFI_PROFILES=$(nmcli -t -f NAME,TYPE connection show \
+    | grep ':802-11-wireless$' \
+    | grep -v '^plink-rescue' \
+    | wc -l 2>/dev/null || echo 0)
 if [ "$WIFI_PROFILES" -eq 0 ]; then
-    echo "No WiFi profiles configured — starting AP mode."
-    bash "$TOGGLE"
+    echo "No WiFi profiles configured — showing setup prompt screen."
+    python3 "$SCREEN_SCRIPT" setup
     exit 0
 fi
 

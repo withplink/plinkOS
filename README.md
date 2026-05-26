@@ -76,6 +76,12 @@ cp .env.example .env
 bash pi-scripts/setup-remote.sh
 ```
 
+During setup you'll be prompted for:
+- **Pi password** (set during flashing)
+- **Display model** (pick from list)
+- **Frame label** — e.g. customer name; used to identify the frame and name the rescue WiFi network
+- **Rescue WiFi** — a unique `plink-rescue-<label>` SSID with a generated 8-char password; create a hotspot with these credentials for emergency SSH access if the frame loses WiFi
+
 The script will:
 - Wait for the Pi to come online
 - Set static IP `192.168.1.50`
@@ -86,12 +92,42 @@ The script will:
 - Install systemd services (`piink`, `plink-buttons`, `plink-boot-check`)
 - Patch the Inky library for GPIO/SPI compatibility
 - Install Avahi mDNS service
+- Install developer SSH key (for recovery access)
+- Configure rescue WiFi network on the Pi
 - Reboot the Pi (required for boot config changes)
 - Start the frame server
 
 ### 4. Done
 
 The frame is live at `http://pi.local` or `http://192.168.1.50`. Open it on your phone and upload a photo.
+
+## Boot Flow
+
+| State | What shows on the e-ink display |
+|---|---|
+| First power-on, no WiFi configured | "Welcome to Plink — Hold Button A to begin setup" screen |
+| Button A held (~1.5s) | AP mode: QR code + `plink-setup` WiFi credentials |
+| Connected, empty queue | Default placeholder image (`great_wave_retro.png`) |
+| Connected, queue has photos | Current photo from queue |
+
+The `plink-boot-check` service runs before the frame server on every boot. If no WiFi profiles are saved (excluding the rescue network), it renders the setup prompt directly to the display and exits — no AP mode is started automatically.
+
+## Recovery Access
+
+### Rescue WiFi (emergency SSH)
+
+Each frame has a unique `plink-rescue-<label>` WiFi profile installed during setup. If the frame loses WiFi connectivity, create a hotspot with the rescue credentials (saved at `/home/pi/PiInk/config/rescue.conf` on the Pi) — the frame will connect automatically without showing the setup screen.
+
+### Developer SSH key (AP mode recovery)
+
+A shared `plink_frames` SSH key is installed on every frame during setup. To access any frame without pre-coordination:
+
+1. Hold **Button A** (~1.5s) → frame switches to AP mode, e-ink shows QR + credentials
+2. Connect your Mac to `plink-setup` WiFi
+3. SSH in:
+   ```bash
+   ssh -i ~/.ssh/plink_frames pi@192.168.4.1
+   ```
 
 ## Deploying changes
 

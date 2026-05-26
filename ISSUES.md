@@ -16,21 +16,33 @@
 
 
 
-## [DefaultScreen] Full set of e-ink state screens
+## [DefaultScreen] Design images for all Pi lifecycle states
 
-4 screens needed across the Pi lifecycle:
+UI/assets only — code wiring tracked in separate issues. Need designed images for:
 
-1. **Unbox / powered-off** — e-ink retains last image when Pi is off; needs a welcome/brand image written to display during first install so the frame looks good out of the box.
-2. **Boot, no WiFi configured** — Pi booted, no queue, no WiFi; prompts user to onboard ("Hold A to begin setup").
-3. **AP mode / WiFi setup** — shown after long-press A; displays QR code + credentials so user can connect phone and enter WiFi. Existing `draw_ap_screen()` covers this.
-4. **Connected, empty queue** — Pi on WiFi, no photos yet; `draw_default_screen()` now loads `great_wave_retro.png` (✅ done).
+1. **Unbox / powered-off** — brand/welcome image written to display during first install so the frame looks good out of the box.
+2. **Boot, no WiFi configured** — "Hold A to begin setup" prompt screen. Shown on boot when no WiFi profiles exist.
+3. **AP mode / WiFi setup** — QR code + credentials screen. Existing `draw_ap_screen()` functional but needs polish.
+4. **Connected, empty queue** — ✅ done (`great_wave_retro.png` via `draw_default_screen()`).
 
-**Notes:**
-- State 2: install already writes a default image to e-ink (`default_screen.png`). Image is generic — doesn't tell user to press A. Need new onboarding image + code path on boot that detects no-WiFi and renders it. AP screen still shows after long-press A as before.
+**Root cause:** No designed images for states 1, 2. State 3 needs polish. State 4 done.
 
-**Root cause:** No designed images for states 1, 2. State 3 functional but unpolished. State 4 done.
+**Status:** 🔵 In progress — state 4 done. States 1, 2 need images; state 3 needs polish.
 
-**Status:** 🔵 In progress — state 4 done (great_wave_retro). States 1, 2 need images; state 3 needs polish.
+---
+
+## [BootNoWiFi] Boot with no WiFi should show prompt screen, not auto-start AP mode
+
+**Repro:**
+1. Pi boots with no WiFi profiles configured (fresh install or reset)
+2. Expected: e-ink shows "Hold A to begin setup" prompt screen; Pi waits for button press
+3. Actual: `check_wifi_boot.sh` detects no profiles → immediately calls `toggle_hotspot.sh` → AP mode starts without user input
+
+**Root cause:** `check_wifi_boot.sh` auto-started AP on no-WiFi condition instead of showing a prompt.
+
+**Fix:** `check_wifi_boot.sh` no-profiles branch now calls `show_hotspot_screen.py setup` directly (webserver not yet up at boot-check time). `show_hotspot_screen.py` gains `draw_setup_screen()` — renders centered "Welcome to Plink / Hold Button A to begin setup" text. Falls back to `SETUP_SCREEN_PATH` (`/home/pi/PiInk/assets/setup_screen.png`) if that image exists. `plink-buttons` service handles long-press A → `toggle_hotspot.sh` → AP mode (unchanged).
+
+**Status:** 🟡 Fix implemented, pending test. Awaiting designed image for `setup_screen.png`.
 
 ---
 

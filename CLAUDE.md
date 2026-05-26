@@ -37,9 +37,30 @@ After any fix or change to the Pi server, check `/Users/shoaibahmed/code/persona
 - `pi-scripts/setup-local.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
 - `pi-scripts/setup-remote.sh` → remote setup over SSH (called by `plink.sh`, has spinner UI)
 - `pi-scripts/reset.sh` → resets Pi to pre-install state
-- `pi-scripts/scripts/show_hotspot_screen.py` → renders AP QR screen (`draw_ap_screen`) or empty-queue placeholder (`draw_default_screen`); called via `/api/hotspot/screen`
+- `pi-scripts/scripts/show_hotspot_screen.py` → renders AP QR screen (`draw_ap_screen`), empty-queue placeholder (`draw_default_screen`), or first-boot setup prompt (`draw_setup_screen`); called via `/api/hotspot/screen` or directly at boot
+- `pi-scripts/scripts/check_wifi_boot.sh` → runs at boot via `plink-boot-check.service`; if no non-rescue WiFi profiles → renders setup screen via `show_hotspot_screen.py setup` and exits; if profiles exist but no IP/internet → starts AP mode
 - `pi-scripts/scripts/toggle_hotspot.sh` → toggles between AP and client mode; on switch-back, shows current queue item if queue non-empty, else calls `render_screen default`
 - `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Reset/Push menu)
+
+### Boot screen
+
+- `draw_setup_screen()` — renders "Welcome to Plink / Hold Button A to begin setup" fallback text; checks `SETUP_SCREEN_PATH` (`/home/pi/PiInk/assets/setup_screen.png`) first
+- Called as `python3 show_hotspot_screen.py setup` by `check_wifi_boot.sh` when no WiFi profiles present
+
+### Rescue WiFi
+
+- SSID format: `plink-rescue-<frame-label>` (e.g. `plink-rescue-johns-frame`)
+- Configured during `plink.sh` install via `prompt_rescue_wifi()`; random 8-char alphanumeric password generated per frame
+- `check_wifi_boot.sh` filters out any NM connection with `^plink-rescue` prefix before counting WiFi profiles — rescue network doesn't trigger normal-boot path
+- Credentials stored on Pi at `/home/pi/PiInk/config/rescue.conf` (chmod 600)
+- Per-frame log saved to `plink-private/customers/<label>.md` during install (optional)
+
+### Developer SSH key
+
+- `plink_frames` ed25519 key installed on every frame during `setup-remote.sh`
+- Public key hardcoded in `setup-remote.sh` → appended to `~/.ssh/authorized_keys` on Pi
+- Private key at `~/.ssh/plink_frames` on Mac + in `plink-private` repo
+- Recovery path: hold A → AP mode → `ssh -i ~/.ssh/plink_frames pi@192.168.4.1`
 
 ### Setup Script UX
 

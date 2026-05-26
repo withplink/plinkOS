@@ -181,6 +181,56 @@ prompt_display_model() {
   echo ""
 }
 
+prompt_rescue_wifi() {
+  _DEFAULT_RESCUE_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 8 || \
+    python3 -c "import secrets; print(secrets.token_urlsafe(6)[:8])")
+
+  echo "Frame label — used to identify this frame (e.g. customer name, location)."
+  echo ""
+  tty_read "  Frame label: " FRAME_LABEL
+  # Slugify: lowercase, spaces→hyphens, strip non-alphanumeric-hyphen
+  FRAME_LABEL=$(echo "$FRAME_LABEL" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
+  FRAME_LABEL="${FRAME_LABEL:-frame}"
+  echo ""
+
+  _DEFAULT_RESCUE_SSID="plink-rescue-${FRAME_LABEL}"
+
+  echo "Rescue WiFi — for emergency SSH access if the frame gets stuck."
+  printf "  ${DIM}Create a hotspot with these credentials on your phone or router.\n"
+  printf "  Pi connects silently; setup screen still shows.\n"
+  printf "  Press Enter to accept defaults.${NC}\n"
+  echo ""
+  tty_read "  Rescue SSID [${_DEFAULT_RESCUE_SSID}]: " _rescue_ssid
+  RESCUE_SSID="${_rescue_ssid:-$_DEFAULT_RESCUE_SSID}"
+  echo ""
+  tty_read "  Rescue password [${_DEFAULT_RESCUE_PASS}]: " _rescue_pass
+  RESCUE_PASS="${_rescue_pass:-$_DEFAULT_RESCUE_PASS}"
+  echo ""
+  printf "  ${GREEN}✓${NC} Rescue network: ${BOLD}${RESCUE_SSID}${NC}  password: ${BOLD}${RESCUE_PASS}${NC}\n"
+  echo ""
+
+  CUSTOMERS_DIR="$SCRIPT_DIR/../plink-private/customers"
+  if [ -d "$CUSTOMERS_DIR" ]; then
+    tty_read "  Save to customers log? [Y/n]: " _save_log
+    if [ "${_save_log:-Y}" != "n" ] && [ "${_save_log:-Y}" != "N" ]; then
+      _log_file="$CUSTOMERS_DIR/${FRAME_LABEL}.md"
+      cat > "$_log_file" <<LOG
+# ${FRAME_LABEL}
+
+- **Install date:** $(date '+%Y-%m-%d')
+- **Pi host:** ${PI_HOST}
+- **Display:** ${DISPLAY_MODEL:-unknown}
+- **Rescue SSID:** ${RESCUE_SSID}
+- **Rescue password:** ${RESCUE_PASS}
+LOG
+      printf "  ${GREEN}✓${NC} Saved to plink-private/customers/${FRAME_LABEL}.md\n"
+    fi
+  fi
+
+  export RESCUE_SSID RESCUE_PASS FRAME_LABEL
+  echo ""
+}
+
 do_install() {
   if is_pi; then
     # ── On Pi ──
@@ -204,6 +254,7 @@ do_install() {
       ssh-keygen -R "$PI_HOST" >/dev/null 2>&1 || true
     fi
     prompt_display_model
+    prompt_rescue_wifi
     bash "$SCRIPT_DIR/pi-scripts/setup-remote.sh" "$@"
     [ -n "${TMP_DIR:-}" ] && rm -rf "$TMP_DIR"
   fi

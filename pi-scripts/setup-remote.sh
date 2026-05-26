@@ -119,11 +119,30 @@ section "2/5" "Preparing system"
 step "Enable passwordless sudo" \
   $SSH "echo '$PI_PASS' | sudo -S bash -c 'echo \"pi ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/pi && chmod 440 /etc/sudoers.d/pi'"
 
+step "Install developer SSH key" \
+  $SSH "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+    grep -qF 'plink-frames' ~/.ssh/authorized_keys 2>/dev/null || \
+    echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdn0OmzdEGD2w5fCTPnSDtiAl4fVAImqmeIFtLwcH5I plink-frames' >> ~/.ssh/authorized_keys && \
+    chmod 600 ~/.ssh/authorized_keys"
+
 step "Configure networking" \
   $SSH "sudo bash -c 'CON=\$(nmcli -t -f NAME connection show --active | grep wlan | head -1); [ -n \"\$CON\" ] && nmcli connection modify \"\$CON\" ipv4.addresses 192.168.1.50/24 ipv4.gateway 192.168.1.1 ipv4.dns \"8.8.8.8 1.1.1.1\" ipv4.method manual ipv6.method link-local || echo \"No active wlan connection — skipping static IP\"'"
 
 step "Disable WiFi power save" \
   $SSH "sudo bash -c 'mkdir -p /etc/NetworkManager/conf.d && printf \"[connection]\nwifi.powersave=2\n\" > /etc/NetworkManager/conf.d/wifi-powersave.conf'"
+
+if [ -n "${RESCUE_SSID:-}" ]; then
+  _step_rescue_wifi() {
+    $SSH "sudo nmcli con delete '${RESCUE_SSID}' 2>/dev/null || true && \
+      sudo nmcli con add type wifi con-name '${RESCUE_SSID}' ssid '${RESCUE_SSID}' \
+        wifi-sec.key-mgmt wpa-psk wifi-sec.psk '${RESCUE_PASS}' \
+        connection.autoconnect yes >/dev/null && \
+      mkdir -p $PI_HOME/config && \
+      printf 'ssid=%s\npassword=%s\n' '${RESCUE_SSID}' '${RESCUE_PASS}' > $PI_HOME/config/rescue.conf && \
+      chmod 600 $PI_HOME/config/rescue.conf"
+  }
+  step "Configure rescue WiFi (${RESCUE_SSID})" _step_rescue_wifi
+fi
 
 # ── Phase 3: Install ──
 section "3/5" "Installing Plink"

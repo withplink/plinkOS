@@ -101,6 +101,31 @@ def draw_ap_screen(password: str) -> Image.Image:
 
 
 DEFAULT_SCREEN_PATH = "/home/pi/PiInk/assets/default_screen.png"
+SETUP_SCREEN_PATH = "/home/pi/PiInk/assets/setup_screen.png"
+
+
+def draw_setup_screen() -> Image.Image:
+    """'Hold A to begin setup' prompt. Shown on boot when no WiFi is configured.
+    Replace SETUP_SCREEN_PATH with a designed image to override this fallback."""
+    try:
+        img = Image.open(SETUP_SCREEN_PATH).convert("RGB")
+        img = img.resize((W, H), Image.LANCZOS)
+        return img
+    except Exception:
+        pass
+    img = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
+    font_title = make_font(FONT_BOLD_PATH, 52)
+    font_body = make_font(FONT_PATH, 28)
+    font_hint = make_font(FONT_PATH, 20)
+
+    draw.text((W // 2, H // 2 - 60), "Welcome to Plink",
+              font=font_title, fill="black", anchor="mm")
+    draw.text((W // 2, H // 2 + 16), "Hold Button A to begin setup",
+              font=font_body, fill="#444444", anchor="mm")
+    draw.text((W // 2, H - 36), "plink-setup  •  press and hold for 1.5s",
+              font=font_hint, fill="#aaaaaa", anchor="mm")
+    return img
 
 
 def draw_default_screen() -> Image.Image:
@@ -135,5 +160,7 @@ if __name__ == "__main__":
     if mode == "ap":
         password = sys.argv[2] if len(sys.argv) > 2 else "plink123"
         show(draw_ap_screen(password))
+    elif mode == "setup":
+        show(draw_setup_screen())
     else:
         show(draw_default_screen())
