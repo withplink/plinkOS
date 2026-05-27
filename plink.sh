@@ -1,6 +1,6 @@
 #!/bin/bash
 # Plink — e-ink frame manager
-# curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/plink.sh | bash
+# curl -sL https://raw.githubusercontent.com/PixeledCode/plinkOS/main/plink.sh | bash
 
 set -e
 
@@ -67,7 +67,7 @@ load_env() {
 clone_repo() {
   TMP_DIR=$(mktemp -d)
   printf "  ${YELLOW}⋯${NC} Fetching Plink"
-  git clone https://github.com/PixeledCode/pi-ink.git "$TMP_DIR" >/dev/null 2>&1 &
+  git clone https://github.com/PixeledCode/plinkOS.git "$TMP_DIR" >/dev/null 2>&1 &
   local pid=$! i=0
   while kill -0 $pid 2>/dev/null; do
     printf "\r  ${YELLOW}%s${NC} Fetching Plink" "${SPINNER_CHARS[$((i++ % ${#SPINNER_CHARS[@]}))]}"

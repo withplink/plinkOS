@@ -54,7 +54,7 @@ Insert the card into the Pi Zero 2W, connect power, and wait ~60 seconds for fir
 **One-line setup (recommended):**
 
 ```bash
-curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/plink.sh | bash
+curl -sL https://raw.githubusercontent.com/PixeledCode/plinkOS/main/plink.sh | bash
 ```
 
 This will prompt for your Pi's password (the one you set during flashing). It connects via `pi.local` (mDNS/Bonjour — works out of the box on macOS/iOS), then handles everything: dependency install, display driver patch, static IP setup, service installation, and reboot. Stale SSH host keys from reflashing are cleared automatically.
@@ -62,14 +62,14 @@ This will prompt for your Pi's password (the one you set during flashing). It co
 Add `--verbose` or `-v` to see full command output instead of the default spinner:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/PixeledCode/pi-ink/main/plink.sh | bash -s -- --verbose
+curl -sL https://raw.githubusercontent.com/PixeledCode/plinkOS/main/plink.sh | bash -s -- --verbose
 ```
 
 **Manual setup (alternative):**
 
 ```bash
-git clone https://github.com/PixeledCode/pi-ink.git
-cd pi-ink
+git clone https://github.com/PixeledCode/plinkOS.git
+cd plinkOS
 cp .env.example .env
 # Edit .env — PI_PASS must match the password from step 1
 bash pi-scripts/setup-remote.sh
