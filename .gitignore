@@ -1,2 +1,4 @@
 .env
+.antigravitycli/
+__pycache__/
 pi-scripts/default-image.*
