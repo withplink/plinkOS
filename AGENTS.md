@@ -9,13 +9,19 @@ Plink is a two-repo project. Both repos are always in scope regardless of which 
 | `plinkOS` (this repo) | `/Users/shoaibahmed/code/personal/plink/plinkOS` | Pi server (Flask), PWA frontend, setup scripts |
 | `plink-ios` | `/Users/shoaibahmed/code/personal/plink/plink-ios` | iOS SwiftUI app |
 
-**On every session start**, read all of these before doing anything:
-- `/Users/shoaibahmed/code/personal/plink/plinkOS/HANDOFF.md`
-- `/Users/shoaibahmed/code/personal/plink/plinkOS/AGENTS.md`
-- `/Users/shoaibahmed/code/personal/plink/plinkOS/README.md`
-- `/Users/shoaibahmed/code/personal/plink/plink-ios/HANDOFF.md`
+**On every session start**, read all markdown (`.md`) files in the root of all three repositories to get full context. Specifically, read these files before doing anything:
+
 - `/Users/shoaibahmed/code/personal/plink/plink-ios/AGENTS.md`
+- `/Users/shoaibahmed/code/personal/plink/plink-ios/HANDOFF.md`
+- `/Users/shoaibahmed/code/personal/plink/plink-ios/ISSUES.md`
 - `/Users/shoaibahmed/code/personal/plink/plink-ios/README.md`
+- `/Users/shoaibahmed/code/personal/plink/plink-ios/TESTING.md`
+- `/Users/shoaibahmed/code/personal/plink/plinkOS/AGENTS.md`
+- `/Users/shoaibahmed/code/personal/plink/plinkOS/HANDOFF.md`
+- `/Users/shoaibahmed/code/personal/plink/plinkOS/ISSUES.md`
+- `/Users/shoaibahmed/code/personal/plink/plinkOS/README.md`
+- `/Users/shoaibahmed/code/personal/plink/plink-ops/AGENTS.md`
+- `/Users/shoaibahmed/code/personal/plink/plink-ops/README.md`
 
 **Cross-repo changes**: if a task requires changes in `plink-ios` (iOS), make them directly — edit the Swift files as needed. Do not ask the user to switch repos.
 
