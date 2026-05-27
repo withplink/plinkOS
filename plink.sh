@@ -209,7 +209,7 @@ prompt_rescue_wifi() {
   printf "  ${GREEN}✓${NC} Rescue network: ${BOLD}${RESCUE_SSID}${NC}  password: ${BOLD}${RESCUE_PASS}${NC}\n"
   echo ""
 
-  CUSTOMERS_DIR="$SCRIPT_DIR/../plink-private/customers"
+  CUSTOMERS_DIR="$SCRIPT_DIR/../plink-ops/customers"
   if [ -d "$CUSTOMERS_DIR" ]; then
     tty_read "  Save to customers log? [Y/n]: " _save_log
     if [ "${_save_log:-Y}" != "n" ] && [ "${_save_log:-Y}" != "N" ]; then
@@ -223,7 +223,7 @@ prompt_rescue_wifi() {
 - **Rescue SSID:** ${RESCUE_SSID}
 - **Rescue password:** ${RESCUE_PASS}
 LOG
-      printf "  ${GREEN}✓${NC} Saved to plink-private/customers/${FRAME_LABEL}.md\n"
+      printf "  ${GREEN}✓${NC} Saved to plink-ops/customers/${FRAME_LABEL}.md\n"
     fi
   fi
 

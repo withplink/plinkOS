@@ -53,13 +53,13 @@ After any fix or change to the Pi server, check `/Users/shoaibahmed/code/persona
 - Configured during `plink.sh` install via `prompt_rescue_wifi()`; random 8-char alphanumeric password generated per frame
 - `check_wifi_boot.sh` filters out any NM connection with `^plink-rescue` prefix before counting WiFi profiles — rescue network doesn't trigger normal-boot path
 - Credentials stored on Pi at `/home/pi/PiInk/config/rescue.conf` (chmod 600)
-- Per-frame log saved to `plink-private/customers/<label>.md` during install (optional)
+- Per-frame log saved to `plink-ops/customers/<label>.md` during install (optional)
 
 ### Developer SSH key
 
 - `plink_frames` ed25519 key installed on every frame during `setup-remote.sh`
 - Public key hardcoded in `setup-remote.sh` → appended to `~/.ssh/authorized_keys` on Pi
-- Private key at `~/.ssh/plink_frames` on Mac + in `plink-private` repo
+- Private key at `~/.ssh/plink_frames` on Mac + in `plink-ops` repo
 - Recovery path: hold A → AP mode → `ssh -i ~/.ssh/plink_frames pi@192.168.4.1`
 
 ### Setup Script UX

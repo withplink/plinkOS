@@ -14,18 +14,18 @@ Boot flow hardening, rescue access, and developer SSH key infrastructure.
 
 ### Rescue WiFi
 - Per-frame unique SSID `plink-rescue-<label>` with random 8-char password generated at install
-- `plink.sh`: prompts frame label → slugified → used as SSID suffix; offers to save creds to `plink-private/customers/<label>.md`
+- `plink.sh`: prompts frame label → slugified → used as SSID suffix; offers to save creds to `plink-ops/customers/<label>.md`
 - `check_wifi_boot.sh`: ignores any NM connection with name prefix `plink-rescue` when counting WiFi profiles
 - Creds saved on Pi at `/home/pi/PiInk/config/rescue.conf` (chmod 600)
 
 ### Developer SSH Key
 - `plink_frames` ed25519 key pair generated; public key hardcoded in `setup-remote.sh`
 - Installed to `~/.ssh/authorized_keys` on every frame during setup
-- Private key stored at `~/.ssh/plink_frames` on Mac + in `plink-private` repo
+- Private key stored at `~/.ssh/plink_frames` on Mac + in `plink-ops` repo
 - Recovery: hold A → AP mode → `ssh -i ~/.ssh/plink_frames pi@192.168.4.1`
+### plink-ops repo
 
-### plink-private repo
-- Created at `/Users/shoaibahmed/code/personal/plink-private` → `github.com/PixeledCode/plink-private` (private)
+- Created at `/Users/shoaibahmed/code/personal/plink/plink-ops` → `github.com/PixeledCode/plink-ops` (private)
 - Contains: `plink_frames` key pair, README with recovery steps, `customers/` directory for per-frame logs
 
 ## 4 e-ink lifecycle screens
