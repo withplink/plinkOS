@@ -25,7 +25,7 @@ Boot flow hardening, rescue access, and developer SSH key infrastructure.
 - Recovery: hold A → AP mode → `ssh -i ~/.ssh/plink_frames pi@192.168.4.1`
 ### plink-ops repo
 
-- Created at `/Users/shoaibahmed/code/personal/plink/plink-ops` → `github.com/PixeledCode/plink-ops` (private)
+- Created at `/Users/shoaibahmed/code/personal/plink/plink-ops` → `github.com/withplink/plink-ops` (private)
 - Contains: `plink_frames` key pair, README with recovery steps, `customers/` directory for per-frame logs
 
 ## 4 e-ink lifecycle screens

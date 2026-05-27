@@ -215,6 +215,6 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 
 ## GitHub
 
-- Repo: https://github.com/PixeledCode/plinkOS
-- SSH remote: `git@github.com-pcode:PixeledCode/plinkOS.git`
+- Repo: https://github.com/withplink/plinkOS
+- SSH remote: `git@github.com-pcode:withplink/plinkOS.git`
 - Based on: https://github.com/tlstommy/PiInk
