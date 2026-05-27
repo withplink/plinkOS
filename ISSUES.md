@@ -10,7 +10,7 @@
 
 **Fix:** `toggle_hotspot.sh` now checks queue length on switch-back. Empty queue → `render_screen default` (shows "Ready / Open Plink to upload your first photo"). Non-empty → `/api/queue/show` with current index as before. `draw_client_screen` removed; replaced by `draw_default_screen` in `show_hotspot_screen.py`.
 
-**Status:** 🟡 Fix implemented, pending test.
+**Status:** ✅ Fixed.
 
 ---
 
@@ -42,7 +42,7 @@ UI/assets only — code wiring tracked in separate issues. Need designed images 
 
 **Fix:** `check_wifi_boot.sh` no-profiles branch now calls `show_hotspot_screen.py setup` directly (webserver not yet up at boot-check time). `show_hotspot_screen.py` gains `draw_setup_screen()` — renders centered "Welcome to Plink / Hold Button A to begin setup" text. Falls back to `SETUP_SCREEN_PATH` (`/home/pi/PiInk/assets/setup_screen.png`) if that image exists. `plink-buttons` service handles long-press A → `toggle_hotspot.sh` → AP mode (unchanged).
 
-**Status:** 🟡 Fix implemented, pending test. Awaiting designed image for `setup_screen.png`.
+**Status:** ✅ Fixed.
 
 ---
 
