@@ -172,10 +172,6 @@ The `pi-scripts/patch_inky.py` script patches the installed Inky library (v2.x) 
 
 This runs automatically during `setup-remote.sh`.
 
-## Design
+## Design for PWA
 
 Cream paper background, muted rose accent, 1px hairlines, halftone dot textures, Instrument Serif + Geist typefaces.
-
-## Based on
-
-[PiInk](https://github.com/tlstommy/PiInk) by [@tlstommy](https://github.com/tlstommy)
