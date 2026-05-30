@@ -28,17 +28,22 @@ Boot flow hardening, rescue access, and developer SSH key infrastructure.
 - Created at `/Users/shoaibahmed/code/personal/plink/plink-ops` → `github.com/withplink/plink-ops` (private)
 - Contains: `plink_frames` key pair, README with recovery steps, `customers/` directory for per-frame logs
 
-## 4 e-ink lifecycle screens
+## 4 e-ink lifecycle screens — ✅ Complete
 
-| # | State | Status |
-|---|-------|--------|
-| 1 | Unbox / Pi powered off | Image needed |
-| 2 | Boot, no WiFi configured | ✅ Code done — image needed (`setup_screen.png`) |
-| 3 | AP mode / WiFi setup (after long-press A) | Existing `draw_ap_screen()` — needs polish |
-| 4 | Connected, empty queue | ✅ `great_wave_retro.png` deployed |
+| # | State | Asset | Status |
+|---|-------|-------|--------|
+| 1 | Unbox / Pi powered off | `unbox_screen.png` | ✅ Deployed |
+| 2 | Boot, no WiFi configured | `no_wifi_screen.png` | ✅ Deployed |
+| 3 | AP mode / WiFi setup (after long-press A) | `ap_screen.png` | ✅ Deployed |
+| 4 | Connected, empty queue | `empty_queue_screen.png` | ✅ Deployed |
+
+All assets in `pi-scripts/assets/`, deployed by `setup-remote.sh` and `push.sh`. Each falls back to a programmatic render if the file is missing.
+
+## Transfer option — ✅ Added to plink.sh
+
+`plink.sh` now has 4 options: Install / Transfer / Reset / Push. Transfer wipes photos, queue, settings, and all WiFi profiles, renders `unbox_screen.png` to e-ink, then shuts down. New owner powers on and presses Button A to begin setup.
 
 ## Next Steps
 
-- Provide designed images for screens 1, 2, 3 (`[DefaultScreen]` issue)
 - Test `[BootNoWiFi]` + `[Onboarding]` fixes on real Pi
 - `[SoftwareUpdate]` — Pi pulls latest from GitHub on demand via API endpoint

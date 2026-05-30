@@ -49,7 +49,16 @@ def qr_image(data: str, box_size: int = 6) -> Image.Image:
         return img
 
 
+AP_SCREEN_PATH = "/home/pi/PiInk/assets/ap_screen.png"
+
+
 def draw_ap_screen(password: str) -> Image.Image:
+    try:
+        img = Image.open(AP_SCREEN_PATH).convert("RGB")
+        img = img.resize((W, H), Image.LANCZOS)
+        return img
+    except Exception:
+        pass
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
@@ -100,8 +109,8 @@ def draw_ap_screen(password: str) -> Image.Image:
     return img
 
 
-DEFAULT_SCREEN_PATH = "/home/pi/PiInk/assets/default_screen.png"
-SETUP_SCREEN_PATH = "/home/pi/PiInk/assets/setup_screen.png"
+DEFAULT_SCREEN_PATH = "/home/pi/PiInk/assets/empty_queue_screen.png"
+SETUP_SCREEN_PATH = "/home/pi/PiInk/assets/no_wifi_screen.png"
 
 
 def draw_setup_screen() -> Image.Image:

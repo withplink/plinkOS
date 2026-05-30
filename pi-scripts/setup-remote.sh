@@ -255,6 +255,22 @@ step "Start frame server" \
 step "Verify display" \
   $SSH "sudo systemctl is-active piink | grep -q active"
 
+_step_default_screen() {
+  $SCP "$SCRIPT_DIR/assets/unbox_screen.png" "$PI:$PI_HOME/assets/unbox_screen.png" && \
+  $SCP "$SCRIPT_DIR/assets/empty_queue_screen.png" "$PI:$PI_HOME/assets/empty_queue_screen.png" && \
+  $SCP "$SCRIPT_DIR/assets/no_wifi_screen.png" "$PI:$PI_HOME/assets/no_wifi_screen.png" && \
+  $SCP "$SCRIPT_DIR/assets/ap_screen.png" "$PI:$PI_HOME/assets/ap_screen.png" && \
+  $SSH "python3 -c \"
+import json, os, subprocess
+q = '/home/pi/PiInk/config/queue.json'
+empty = not os.path.exists(q) or len(json.load(open(q)).get('items', [])) == 0
+if empty:
+    subprocess.run(['python3', '/home/pi/PiInk/scripts/show_hotspot_screen.py', 'default'])
+\""
+}
+
+step "Display default screen" _step_default_screen
+
 # ── Install Tailscale (authentication done via Plink app) ──
 step "Install Tailscale" \
   $SSH "curl -fsSL https://tailscale.com/install.sh | sudo sh -s -- -yes 2>&1"

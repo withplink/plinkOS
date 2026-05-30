@@ -102,14 +102,17 @@ The frame is live at `http://pi.local` or `http://192.168.1.50`. Open it on your
 
 ## Boot Flow
 
-| State | What shows on the e-ink display |
-|---|---|
-| First power-on, no WiFi configured | "Welcome to Plink — Hold Button A to begin setup" screen |
-| Button A held (~1.5s) | AP mode: QR code + `plink-setup` WiFi credentials |
-| Connected, empty queue | Default placeholder image (`great_wave_retro.png`) |
-| Connected, queue has photos | Current photo from queue |
+| # | State | Trigger | Asset |
+|---|-------|---------|-------|
+| 1 | **Unbox / powered-off** | Frame ships or is transferred; e-ink retains image without power | `unbox_screen.png` |
+| 2 | **Boot, no WiFi** | New owner powers on; no WiFi profiles saved | `no_wifi_screen.png` → fallback: "Hold A to begin setup" text |
+| 3 | **AP mode / WiFi setup** | User holds Button A (~1.5s) | `ap_screen.png` → fallback: programmatic QR + `plink-setup` / `plink123` |
+| 4 | **Connected, empty queue** | WiFi configured, no photos uploaded yet | `empty_queue_screen.png` → fallback: "Ready / upload first photo" text |
+| — | **Queue active** | Photos in queue | Current photo from queue |
 
-The `plink-boot-check` service runs before the frame server on every boot. If no WiFi profiles are saved (excluding the rescue network), it renders the setup prompt directly to the display and exits — no AP mode is started automatically.
+All screen assets live at `/home/pi/PiInk/assets/` on the Pi and `pi-scripts/assets/` in the repo. Each has a programmatic fallback so the frame is never blank.
+
+The `plink-boot-check` service runs before the frame server on every boot. If no WiFi profiles are saved (excluding the rescue network), it renders state 2 directly to the display and exits — no AP mode is started automatically.
 
 ## Recovery Access
 

@@ -260,6 +260,57 @@ do_install() {
   fi
 }
 
+do_transfer() {
+  if ! in_repo; then
+    echo "Error: run from repo root."
+    exit 1
+  fi
+  ensure_sshpass
+  prompt_pi_creds
+
+  local SSH="sshpass -p $PI_PASS ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR $PI_USER@$PI_HOST"
+  local PI_HOME="/home/pi/PiInk"
+
+  echo ""
+  printf "  ${RED}${BOLD}⚠ WARNING — This cannot be undone${NC}\n"
+  echo ""
+  printf "  The following will be permanently deleted from the frame:\n"
+  printf "  ${DIM}• All photos and queue\n"
+  printf "  • All settings\n"
+  printf "  • All saved WiFi networks (including rescue)\n${NC}"
+  echo ""
+  printf "  The frame will shut down. The new owner powers it on,\n"
+  printf "  presses Button A, and connects to their WiFi.\n"
+  echo ""
+  tty_read "  Type ${BOLD}TRANSFER${NC} to confirm: " _confirm
+  echo ""
+  if [ "$_confirm" != "TRANSFER" ]; then
+    printf "  ${DIM}Cancelled.${NC}\n"
+    exit 0
+  fi
+
+  printf "  ${DIM}Stopping frame server...${NC}\n"
+  $SSH "sudo systemctl stop piink 2>/dev/null || true"
+
+  printf "  ${DIM}Wiping photos and queue...${NC}\n"
+  $SSH "rm -rf $PI_HOME/img/* $PI_HOME/config/queue.json $PI_HOME/config/settings.json $PI_HOME/config/rescue.conf 2>/dev/null || true"
+
+  printf "  ${DIM}Setting display to unbox screen...${NC}\n"
+  $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py default" 2>/dev/null || true
+
+  printf "  ${DIM}Removing WiFi profiles...${NC}\n"
+  $SSH "nmcli -t -f NAME,TYPE connection show | grep ':802-11-wireless' | cut -d: -f1 | while IFS= read -r name; do nmcli connection delete \"\$name\" 2>/dev/null; done || true"
+
+  printf "  ${DIM}Shutting down frame...${NC}\n"
+  $SSH "sudo shutdown now" 2>/dev/null || true
+
+  echo ""
+  printf "  ${GREEN}${BOLD}Frame is ready for the new owner.${NC}\n"
+  echo ""
+  printf "  ${DIM}They can power it on and press Button A to begin setup.${NC}\n"
+  echo ""
+}
+
 do_reset() {
   if ! in_repo; then
     echo "Error: run from repo root."
@@ -290,10 +341,11 @@ if [ ! -t 0 ]; then
 fi
 
 # Interactive — show menu
-printf "  ${BOLD}1.${NC} Install   — set up Plink on your frame\n"
+printf "  ${BOLD}1.${NC} Install    — set up Plink on your frame\n"
 if in_repo; then
-  printf "  ${BOLD}2.${NC} Reset     — wipe frame back to clean state\n"
-  printf "  ${BOLD}3.${NC} Push      — deploy latest code to frame\n"
+  printf "  ${BOLD}2.${NC} Transfer   — wipe and hand off to a new owner\n"
+  printf "  ${BOLD}3.${NC} Reset      — fully remove Plink from your frame\n"
+  printf "  ${BOLD}4.${NC} Push       — deploy latest code to frame\n"
 fi
 echo ""
 tty_read "  Choice [1]: " CHOICE
@@ -302,8 +354,9 @@ echo ""
 
 case "$CHOICE" in
   1|[iI]*)  do_install "$@" ;;
-  2|[rR]*)  do_reset "$@" ;;
-  3|[pP]*)  do_push "$@" ;;
+  2|[tT]*)  do_transfer "$@" ;;
+  3|[rR]*)  do_reset "$@" ;;
+  4|[pP]*)  do_push "$@" ;;
   *)
     printf "${RED}Invalid choice.${NC}\n"
     exit 1

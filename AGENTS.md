@@ -43,15 +43,27 @@ After any fix or change to the Pi server, check `/Users/shoaibahmed/code/persona
 - `pi-scripts/setup-local.sh` → full Pi-side setup (deps, deploy, services, boot config, patch)
 - `pi-scripts/setup-remote.sh` → remote setup over SSH (called by `plink.sh`, has spinner UI)
 - `pi-scripts/reset.sh` → resets Pi to pre-install state
-- `pi-scripts/scripts/show_hotspot_screen.py` → renders AP QR screen (`draw_ap_screen`), empty-queue placeholder (`draw_default_screen`), or first-boot setup prompt (`draw_setup_screen`); called via `/api/hotspot/screen` or directly at boot
+- `pi-scripts/scripts/show_hotspot_screen.py` → renders lifecycle screens: `draw_ap_screen` (state 3), `draw_default_screen` (state 4), `draw_setup_screen` (state 2); each tries loading a designed image from `assets/` first, falls back to programmatic render; called via `/api/hotspot/screen` or directly at boot
 - `pi-scripts/scripts/check_wifi_boot.sh` → runs at boot via `plink-boot-check.service`; if no non-rescue WiFi profiles → renders setup screen via `show_hotspot_screen.py setup` and exits; if profiles exist but no IP/internet → starts AP mode
 - `pi-scripts/scripts/toggle_hotspot.sh` → toggles between AP and client mode; on switch-back, shows current queue item if queue non-empty, else calls `render_screen default`
-- `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Reset/Push menu)
+- `pi-scripts/assets/` → designed e-ink screen images: `unbox_screen.png` (state 1), `no_wifi_screen.png` (state 2), `ap_screen.png` (state 3), `empty_queue_screen.png` (state 4); deployed by `setup-remote.sh` and `push.sh`
+- `plink.sh` → single entry point at repo root (curl | bash compatible, shows Install/Transfer/Reset/Push menu)
 
-### Boot screen
+### e-ink lifecycle screens
 
-- `draw_setup_screen()` — renders "Welcome to Plink / Hold Button A to begin setup" fallback text; checks `SETUP_SCREEN_PATH` (`/home/pi/PiInk/assets/setup_screen.png`) first
-- Called as `python3 show_hotspot_screen.py setup` by `check_wifi_boot.sh` when no WiFi profiles present
+4 states, each backed by a designed asset with programmatic fallback:
+
+| # | State | Asset path | Fallback |
+|---|-------|-----------|---------|
+| 1 | Unbox / powered-off | `assets/unbox_screen.png` | — (rendered during Transfer, retained without power) |
+| 2 | Boot, no WiFi | `assets/no_wifi_screen.png` | "Welcome to Plink / Hold Button A to begin setup" |
+| 3 | AP mode | `assets/ap_screen.png` | Programmatic QR + `plink-setup` / `plink123` |
+| 4 | Connected, empty queue | `assets/empty_queue_screen.png` | "Ready / Open Plink and upload your first photo" |
+
+- `draw_setup_screen()` → state 2; called by `check_wifi_boot.sh` when no WiFi profiles present
+- `draw_ap_screen(password)` → state 3; called by `toggle_hotspot.sh` and `/api/hotspot/screen`
+- `draw_default_screen()` → state 4; called after WiFi reconnect if queue is empty
+- State 1 is rendered explicitly by `plink.sh Transfer` before shutdown; e-ink retains it without power
 
 ### Rescue WiFi
 

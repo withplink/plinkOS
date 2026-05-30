@@ -104,8 +104,17 @@ step "Upload resize script" \
 step "Create assets dir on Pi" \
   "$SSH 'mkdir -p /home/pi/PiInk/assets'"
 
-step "Upload default screen asset" \
-  "$SCP pi-scripts/assets/default_screen.png '$HOST:/home/pi/PiInk/assets/default_screen.png'"
+step "Upload unbox screen asset" \
+  "$SCP pi-scripts/assets/unbox_screen.png '$HOST:/home/pi/PiInk/assets/unbox_screen.png'"
+
+step "Upload empty queue screen asset" \
+  "$SCP pi-scripts/assets/empty_queue_screen.png '$HOST:/home/pi/PiInk/assets/empty_queue_screen.png'"
+
+step "Upload no wifi screen asset" \
+  "$SCP pi-scripts/assets/no_wifi_screen.png '$HOST:/home/pi/PiInk/assets/no_wifi_screen.png'"
+
+step "Upload AP screen asset" \
+  "$SCP pi-scripts/assets/ap_screen.png '$HOST:/home/pi/PiInk/assets/ap_screen.png'"
 
 # ── Phase 2: Restart ──
 section "2/2" "Restarting frame"
