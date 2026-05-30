@@ -2,3 +2,4 @@
 .antigravitycli/
 __pycache__/
 pi-scripts/default-image.*
+pi-scripts/.DS_Store
