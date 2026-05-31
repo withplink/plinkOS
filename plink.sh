@@ -19,10 +19,11 @@ SPINNER_CHARS=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 
 tty_read() {
   local prompt="$1" varname="$2" hidden="$3" val=""
+  printf "%b" "$prompt" > /dev/tty
   if [ "$hidden" = "1" ]; then
-    read -s -p "$prompt" val < /dev/tty
+    read -s val < /dev/tty
   else
-    read -p "$prompt" val < /dev/tty
+    read val < /dev/tty
   fi
   echo ""
   eval "$varname='$val'"
@@ -45,6 +46,25 @@ print_header() {
 
 divider() {
   printf "${DIM}%s${NC}\n" "────────────────────────────────────────"
+}
+
+step() {
+  local label="$1"; shift
+  local i=0
+  while true; do
+    printf "\r  ${YELLOW}%s${NC} %s" "${SPINNER_CHARS[$((i % ${#SPINNER_CHARS[@]}))]}" "$label"
+    i=$((i + 1))
+    sleep 0.1
+    kill -0 $! 2>/dev/null || break
+  done &
+  local pid=$!
+  if "$@" >/dev/null 2>&1; then
+    kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+    printf "\r  ${GREEN}✓${NC} %s\n" "$label"
+  else
+    kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+    printf "\r  ${RED}✗${NC} %s\n" "$label"
+  fi
 }
 
 is_pi() {
@@ -289,20 +309,18 @@ do_transfer() {
     exit 0
   fi
 
-  printf "  ${DIM}Stopping frame server...${NC}\n"
-  $SSH "sudo systemctl stop piink 2>/dev/null || true"
+  echo ""
+  _t_stop()    { $SSH "sudo systemctl stop piink 2>/dev/null || true"; }
+  _t_wipe()    { $SSH "rm -rf $PI_HOME/img/* $PI_HOME/config/queue.json $PI_HOME/config/settings.json $PI_HOME/config/rescue.conf 2>/dev/null || true"; }
+  _t_screen()  { $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py unbox"; }
+  _t_wifi()    { $SSH "nmcli -t -f NAME,TYPE connection show | grep ':802-11-wireless' | cut -d: -f1 | while IFS= read -r name; do nmcli connection delete \"\$name\" 2>/dev/null; done || true"; }
+  _t_shutdown(){ $SSH "sudo shutdown now"; }
 
-  printf "  ${DIM}Wiping photos and queue...${NC}\n"
-  $SSH "rm -rf $PI_HOME/img/* $PI_HOME/config/queue.json $PI_HOME/config/settings.json $PI_HOME/config/rescue.conf 2>/dev/null || true"
-
-  printf "  ${DIM}Setting display to unbox screen...${NC}\n"
-  $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py unbox" 2>/dev/null || true
-
-  printf "  ${DIM}Removing WiFi profiles...${NC}\n"
-  $SSH "nmcli -t -f NAME,TYPE connection show | grep ':802-11-wireless' | cut -d: -f1 | while IFS= read -r name; do nmcli connection delete \"\$name\" 2>/dev/null; done || true"
-
-  printf "  ${DIM}Shutting down frame...${NC}\n"
-  $SSH "sudo shutdown now" 2>/dev/null || true
+  step "Stop frame server"    _t_stop
+  step "Wipe photos and queue" _t_wipe
+  step "Set unbox screen"     _t_screen
+  step "Remove WiFi profiles"  _t_wifi
+  step "Shut down frame"       _t_shutdown
 
   echo ""
   printf "  ${GREEN}${BOLD}Frame is ready for the new owner.${NC}\n"
