@@ -120,8 +120,12 @@ step "Upload AP screen asset" \
 section "2/2" "Restarting frame"
 
 DISPLAY_MODEL="${DISPLAY_MODEL:-Inky Impression 7.3\"}"
-step "Set display model ($DISPLAY_MODEL)" \
-  "$SSH \"echo '$PI_PASS' | sudo -S bash -c 'mkdir -p /etc/systemd/system/piink.service.d && printf \\\"[Service]\\\\nEnvironment=DISPLAY_MODEL=$DISPLAY_MODEL\\\\n\\\" > /etc/systemd/system/piink.service.d/display.conf && systemctl daemon-reload'\""
+_step_display_model() {
+  printf '[Service]\nEnvironment=DISPLAY_MODEL=%s\n' "$DISPLAY_MODEL" | \
+    sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR "$PI_USER@$PI_HOST" \
+      "echo '$PI_PASS' | sudo -S bash -c 'mkdir -p /etc/systemd/system/piink.service.d && cat > /etc/systemd/system/piink.service.d/display.conf && systemctl daemon-reload'"
+}
+step "Set display model ($DISPLAY_MODEL)" _step_display_model
 
 step "Restart piink service" \
   "$SSH \"echo '$PI_PASS' | sudo -S systemctl restart piink\""
