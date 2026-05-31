@@ -121,9 +121,10 @@ section "2/2" "Restarting frame"
 
 DISPLAY_MODEL="${DISPLAY_MODEL:-Inky Impression 7.3\"}"
 _step_display_model() {
+  # Pipe printf output through SSH stdin into cat — sudo must not intercept stdin via echo|sudo -S
   printf '[Service]\nEnvironment=DISPLAY_MODEL=%s\n' "$DISPLAY_MODEL" | \
     sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR "$PI_USER@$PI_HOST" \
-      "echo '$PI_PASS' | sudo -S bash -c 'mkdir -p /etc/systemd/system/piink.service.d && cat > /etc/systemd/system/piink.service.d/display.conf && systemctl daemon-reload'"
+      "sudo bash -c 'mkdir -p /etc/systemd/system/piink.service.d && cat > /etc/systemd/system/piink.service.d/display.conf && systemctl daemon-reload'"
 }
 step "Set display model ($DISPLAY_MODEL)" _step_display_model
 

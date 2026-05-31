@@ -58,13 +58,15 @@ step() {
     kill -0 $! 2>/dev/null || break
   done &
   local pid=$!
-  if "$@" >/dev/null 2>&1; then
-    kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  local rc=0
+  "$@" >/dev/null 2>&1 || rc=$?
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  if [ "$rc" -eq 0 ]; then
     printf "\r  ${GREEN}✓${NC} %s\n" "$label"
   else
-    kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
     printf "\r  ${RED}✗${NC} %s\n" "$label"
   fi
+  return $rc
 }
 
 is_pi() {
@@ -125,8 +127,24 @@ test_ssh() {
 
 prompt_pi_creds() {
   load_env
+  _env_host="${PI_HOST:+1}"
+  _env_user="${PI_USER:+1}"
+  _env_pass="${PI_PASS:+1}"
   PI_USER="${PI_USER:-pi}"
   PI_HOST="${PI_HOST:-pi.local}"
+
+  # Report what came from .env
+  if [ -n "$_env_host" ] || [ -n "$_env_user" ] || [ -n "$_env_pass" ]; then
+    if [ -n "$_env_host" ] && [ -n "$_env_user" ] && [ -n "$_env_pass" ]; then
+      printf "  ${DIM}Credentials loaded from .env (%s@%s)${NC}\n" "$PI_USER" "$PI_HOST"
+    else
+      printf "  ${DIM}Loaded from .env:${NC}"
+      [ -n "$_env_host" ] && printf "${DIM} host=%s${NC}" "$PI_HOST"
+      [ -n "$_env_user" ] && printf "${DIM} user=%s${NC}" "$PI_USER"
+      [ -n "$_env_pass" ] && printf "${DIM} password=***${NC}"
+      printf "\n"
+    fi
+  fi
 
   if [ -n "${PI_PASS:-}" ]; then
     printf "  ${DIM}Trying saved credentials (%s@%s)...${NC}" "$PI_USER" "$PI_HOST"
@@ -144,10 +162,14 @@ prompt_pi_creds() {
   while [ $_cred_attempts -lt 3 ]; do
     echo "Where should Plink connect?"
     echo ""
-    tty_read "  Hostname or IP [${PI_HOST}]: " _host
-    PI_HOST="${_host:-$PI_HOST}"
-    tty_read "  Username [${PI_USER}]: " _user
-    PI_USER="${_user:-$PI_USER}"
+    if [ -z "$_env_host" ]; then
+      tty_read "  Hostname or IP [${PI_HOST}]: " _host
+      PI_HOST="${_host:-$PI_HOST}"
+    fi
+    if [ -z "$_env_user" ]; then
+      tty_read "  Username [${PI_USER}]: " _user
+      PI_USER="${_user:-$PI_USER}"
+    fi
     tty_read "  Password: " PI_PASS 1
     if [ -z "$PI_PASS" ]; then
       echo ""
@@ -313,14 +335,45 @@ do_transfer() {
   _t_stop()    { $SSH "sudo systemctl stop piink 2>/dev/null || true"; }
   _t_wipe()    { $SSH "rm -rf $PI_HOME/img/* $PI_HOME/config/queue.json $PI_HOME/config/settings.json $PI_HOME/config/rescue.conf 2>/dev/null || true"; }
   _t_screen()  { $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py unbox"; }
-  _t_wifi()    { $SSH "nmcli -t -f NAME,TYPE connection show | grep ':802-11-wireless' | cut -d: -f1 | while IFS= read -r name; do nmcli connection delete \"\$name\" 2>/dev/null; done || true"; }
-  _t_shutdown(){ $SSH "sudo shutdown now"; }
 
-  step "Stop frame server"    _t_stop
-  step "Wipe photos and queue" _t_wipe
-  step "Set unbox screen"     _t_screen
-  step "Remove WiFi profiles"  _t_wifi
-  step "Shut down frame"       _t_shutdown
+  # WiFi deletion via SSH kills the session if the active connection is removed.
+  # Write a cleanup script and fire it as a detached background job so SSH exits
+  # before wlan0 goes down, then the script deletes profiles and shuts down.
+  _t_wifi_and_shutdown() {
+    $SSH 'cat > /tmp/plink_cleanup.sh << '"'"'EOFS'"'"'
+#!/bin/bash
+sleep 2
+nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+  | grep ":802-11-wireless$" \
+  | cut -d: -f1 \
+  | while IFS= read -r name; do
+      sudo nmcli connection delete "$name" >/dev/null 2>&1 || true
+    done
+sudo shutdown now
+EOFS
+chmod +x /tmp/plink_cleanup.sh'
+    $SSH 'nohup bash /tmp/plink_cleanup.sh &>/dev/null &'
+  }
+
+  # Fixed wait — cleanup script runs after 2s delay then shuts down; 8s is sufficient.
+  # SSH/ping polling is unreliable here: pi.local mDNS disappears on shutdown causing
+  # DNS resolution to hang for its full timeout regardless of ConnectTimeout.
+  _t_wait_offline() {
+    sleep 8
+  }
+
+  step "Stop frame server"        _t_stop
+  step "Wipe photos and queue"    _t_wipe
+  step "Set unbox screen"         _t_screen
+  step "Wipe WiFi and shut down"  _t_wifi_and_shutdown || {
+    echo ""
+    printf "  ${RED}${BOLD}Transfer aborted — could not deploy cleanup script.${NC}\n"
+    printf "  ${DIM}Frame data has been wiped but WiFi credentials remain.${NC}\n"
+    printf "  ${DIM}Re-run Transfer to try again, or SSH in and run: sudo nmcli connection delete <name>${NC}\n"
+    echo ""
+    exit 1
+  }
+  step "Waiting for frame to shut down" _t_wait_offline
 
   echo ""
   printf "  ${GREEN}${BOLD}Frame is ready for the new owner.${NC}\n"
