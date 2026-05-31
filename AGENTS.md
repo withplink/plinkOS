@@ -13,15 +13,22 @@ Plink is a two-repo project. Both repos are always in scope regardless of which 
 
 - `/Users/shoaibahmed/code/personal/plink/plink-ios/AGENTS.md`
 - `/Users/shoaibahmed/code/personal/plink/plink-ios/HANDOFF.md`
-- `/Users/shoaibahmed/code/personal/plink/plink-ios/ISSUES.md`
 - `/Users/shoaibahmed/code/personal/plink/plink-ios/README.md`
 - `/Users/shoaibahmed/code/personal/plink/plink-ios/TESTING.md`
 - `/Users/shoaibahmed/code/personal/plink/plinkOS/AGENTS.md`
 - `/Users/shoaibahmed/code/personal/plink/plinkOS/HANDOFF.md`
-- `/Users/shoaibahmed/code/personal/plink/plinkOS/ISSUES.md`
 - `/Users/shoaibahmed/code/personal/plink/plinkOS/README.md`
 - `/Users/shoaibahmed/code/personal/plink/plink-ops/AGENTS.md`
 - `/Users/shoaibahmed/code/personal/plink/plink-ops/README.md`
+
+**Issues**: fetch from GitHub, not local files. Use `gh issue list` per repo:
+
+```bash
+gh issue list --repo withplink/plink-ios
+gh issue list --repo withplink/plinkOS
+gh issue list --repo withplink/plink-site
+gh issue list --repo withplink/plink-ops
+```
 
 **Cross-repo changes**: if a task requires changes in `plink-ios` (iOS), make them directly — edit the Swift files as needed. Do not ask the user to switch repos.
 
