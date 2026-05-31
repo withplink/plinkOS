@@ -296,7 +296,7 @@ do_transfer() {
   $SSH "rm -rf $PI_HOME/img/* $PI_HOME/config/queue.json $PI_HOME/config/settings.json $PI_HOME/config/rescue.conf 2>/dev/null || true"
 
   printf "  ${DIM}Setting display to unbox screen...${NC}\n"
-  $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py default" 2>/dev/null || true
+  $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py unbox" 2>/dev/null || true
 
   printf "  ${DIM}Removing WiFi profiles...${NC}\n"
   $SSH "nmcli -t -f NAME,TYPE connection show | grep ':802-11-wireless' | cut -d: -f1 | while IFS= read -r name; do nmcli connection delete \"\$name\" 2>/dev/null; done || true"

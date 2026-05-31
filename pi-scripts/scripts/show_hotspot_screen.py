@@ -4,6 +4,7 @@ Renders a status screen on the Inky Impression 7.3" display.
 Usage:
   python3 show_hotspot_screen.py ap <password>   — show AP mode screen with QR code
   python3 show_hotspot_screen.py default         — show empty-queue placeholder screen
+  python3 show_hotspot_screen.py unbox           — show unbox screen (shown after Transfer)
 """
 
 import sys
@@ -111,6 +112,25 @@ def draw_ap_screen(password: str) -> Image.Image:
 
 DEFAULT_SCREEN_PATH = "/home/pi/PiInk/assets/empty_queue_screen.png"
 SETUP_SCREEN_PATH = "/home/pi/PiInk/assets/no_wifi_screen.png"
+UNBOX_SCREEN_PATH = "/home/pi/PiInk/assets/unbox_screen.png"
+
+
+def draw_unbox_screen() -> Image.Image:
+    try:
+        img = Image.open(UNBOX_SCREEN_PATH).convert("RGB")
+        img = img.resize((W, H), Image.LANCZOS)
+        return img
+    except Exception:
+        pass
+    img = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
+    font_title = make_font(FONT_BOLD_PATH, 52)
+    font_body = make_font(FONT_PATH, 28)
+    draw.text((W // 2, H // 2 - 40), "Welcome to Plink",
+              font=font_title, fill="black", anchor="mm")
+    draw.text((W // 2, H // 2 + 36), "Open the Plink app to get started",
+              font=font_body, fill="#444444", anchor="mm")
+    return img
 
 
 def draw_setup_screen() -> Image.Image:
@@ -171,5 +191,7 @@ if __name__ == "__main__":
         show(draw_ap_screen(password))
     elif mode == "setup":
         show(draw_setup_screen())
+    elif mode == "unbox":
+        show(draw_unbox_screen())
     else:
         show(draw_default_screen())
