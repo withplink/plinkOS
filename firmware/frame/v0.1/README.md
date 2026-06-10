@@ -31,5 +31,6 @@ control.
 
 - The display pin map is isolated in `include/frame_config.h` so we can fix wiring or orientation
   with one edit if the first flash needs a correction.
+- Display bring-up now explicitly asserts `POWER_CTRL` before panel initialization.
 - This project deliberately starts narrow. The queue/control-plane work belongs after the image
   render path is proven.

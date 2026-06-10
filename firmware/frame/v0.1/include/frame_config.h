@@ -10,6 +10,7 @@ constexpr int kEpdBusyPin = 4;
 constexpr int kEpdDcPin = 5;
 constexpr int kEpdResetPin = 6;
 constexpr int kEpdCsPin = 7;
+constexpr int kEpdPowerCtrlPin = 18;
 constexpr int kEpdSckPin = 15;
 constexpr int kEpdMosiPin = 16;
 constexpr int kEpdMisoPin = 17;
@@ -23,4 +24,3 @@ constexpr int kSdSckPin = 21;
 // Canvas
 constexpr int kFrameWidth = 800;
 constexpr int kFrameHeight = 480;
-

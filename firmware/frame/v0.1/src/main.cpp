@@ -118,6 +118,13 @@ static uint16_t nearestSpectra6Color(uint8_t r, uint8_t g, uint8_t b) {
   return bestColor;
 }
 
+static void initDisplayPowerCtrl() {
+  pinMode(kEpdPowerCtrlPin, OUTPUT);
+  digitalWrite(kEpdPowerCtrlPin, HIGH);
+  delay(100);
+  Serial.printf("Display POWER_CTRL enabled on GPIO %d\n", kEpdPowerCtrlPin);
+}
+
 static bool renderBmpFromSd(const char *path) {
   File f = SD.open(path, FILE_READ);
   if (!f) {
@@ -220,6 +227,7 @@ static void listRootFiles() {
 }
 
 static void initDisplay() {
+  initDisplayPowerCtrl();
   SPI.begin(kEpdSckPin, kEpdMisoPin, kEpdMosiPin, kEpdCsPin);
   display.init(115200);
   display.setRotation(0);
