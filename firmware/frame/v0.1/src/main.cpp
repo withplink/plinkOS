@@ -14,7 +14,7 @@ using DisplayType = GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HE
 static const char *kImageName = "/image0.bmp";
 
 SPIClass sdSpi(HSPI);
-DisplayType display(GxEPD2_730c_GDEP073E01(kEpdCsPin, kEpdDcPin, kEpdResetPin, kEpdBusyPin));
+DisplayType display(GxEPD2_730c_GDEP073E01(kEpdCsPin, /*DC=*/-1, kEpdResetPin, kEpdBusyPin));
 
 struct BmpHeader {
   uint32_t pixelOffset = 0;
@@ -120,7 +120,7 @@ static uint16_t nearestSpectra6Color(uint8_t r, uint8_t g, uint8_t b) {
 
 static void initDisplayPowerCtrl() {
   pinMode(kEpdPowerCtrlPin, OUTPUT);
-  digitalWrite(kEpdPowerCtrlPin, HIGH);
+  digitalWrite(kEpdPowerCtrlPin, LOW);  // P-FET SI2301: LOW = display ON
   delay(100);
   Serial.printf("Display POWER_CTRL enabled on GPIO %d\n", kEpdPowerCtrlPin);
 }
