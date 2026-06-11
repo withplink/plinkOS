@@ -319,7 +319,8 @@ do_transfer() {
   printf "  The following will be permanently deleted from the frame:\n"
   printf "  ${DIM}• All photos and queue\n"
   printf "  • All settings\n"
-  printf "  • All saved WiFi networks (including rescue)\n${NC}"
+  printf "  • All saved WiFi networks (including rescue)\n"
+  printf "  • Tailscale authentication (if linked)\n${NC}"
   echo ""
   printf "  The frame will shut down. The new owner powers it on,\n"
   printf "  presses Button A, and connects to their WiFi.\n"
@@ -335,6 +336,15 @@ do_transfer() {
   _t_stop()    { $SSH "sudo systemctl stop piink 2>/dev/null || true"; }
   _t_wipe()    { $SSH "rm -rf $PI_HOME/img/* $PI_HOME/config/queue.json $PI_HOME/config/settings.json $PI_HOME/config/rescue.conf 2>/dev/null || true"; }
   _t_screen()  { $SSH "python3 $PI_HOME/scripts/show_hotspot_screen.py unbox"; }
+
+  # Run logout only if Tailscale is installed and currently authenticated.
+  # tailscale status exits non-zero when not logged in — that is acceptable; skip logout.
+  # If authenticated and logout fails, that is a blocking failure (ADR-012).
+  _t_tailscale_logout() {
+    if $SSH "command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1"; then
+      $SSH "sudo tailscale logout"
+    fi
+  }
 
   # WiFi deletion via SSH kills the session if the active connection is removed.
   # Write a cleanup script and fire it as a detached background job so SSH exits
@@ -365,6 +375,14 @@ chmod +x /tmp/plink_cleanup.sh'
   step "Stop frame server"        _t_stop
   step "Wipe photos and queue"    _t_wipe
   step "Set unbox screen"         _t_screen
+  step "Disconnect Tailscale"     _t_tailscale_logout || {
+    echo ""
+    printf "  ${RED}${BOLD}Transfer aborted — Tailscale logout failed.${NC}\n"
+    printf "  ${DIM}Frame data has been wiped but Tailscale remains authenticated to your account.${NC}\n"
+    printf "  ${DIM}Re-run Transfer, or SSH in and run: sudo tailscale logout${NC}\n"
+    echo ""
+    exit 1
+  }
   step "Wipe WiFi and shut down"  _t_wifi_and_shutdown || {
     echo ""
     printf "  ${RED}${BOLD}Transfer aborted — could not deploy cleanup script.${NC}\n"
