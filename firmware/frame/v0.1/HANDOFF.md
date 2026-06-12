@@ -1,45 +1,29 @@
 # Goal
 
-BLE image transfer pipeline — push image from iOS app to ESP32 frame over BLE.
+BLE image transfer pipeline — hardware-validated end-to-end. Firmware stable.
 
 ## Current State
 
-Firmware management system in place. `releases/01-sd-display` is the stable snapshot — SD card
-read → BMP decode → Spectra 6 render, no serial re-render. Pre-built bins committed.
-
-- `releases/01-sd-display/` — complete source snapshot + `bins/` (bootloader, partitions, firmware)
-- `frame.sh` — unified tool: port auto-detect, Flash or Monitor menu, quit hint before screen launch
-- `flash.sh` — flash-only variant (still functional standalone)
-- Dev `src/main.cpp` — serial re-render removed; `loop()` is idle (`delay(1000)`)
+Full pipeline working:
+- iOS FrameTool picks image → Mantis crop → Floyd-Steinberg dither (Spectra 6) → 24-bit BMP → BLE burst → ESP32 PSRAM buffer → SD write → render
+- Transfer: ~10s for 1,152,054 bytes. Render: ~43–45s (hardware-limited).
+- `releases/02-ble-sd/` — stable snapshot with PSRAM buffer fix. Pre-built bins committed.
 
 ## Files in Flight
 
-- `src/main.cpp` — add BLE server, receive image bytes into PSRAM buffer, trigger re-render
-- `include/frame_config.h` — add BLE UUID constants (MTU, service/char UUIDs)
-- `platformio.ini` — verify BLE deps (ESP32 Arduino core has BLE built-in, no extra lib needed)
+None — firmware is stable. Next work is iOS main app integration.
 
 ## Changed This Session
 
-- `releases/01-sd-display/` — created: full source snapshot, pre-built bins, README
-- `frame.sh` — new unified flash+monitor tool with quit hint and pre-launch pause
-- `flash.sh` — monitor-after-flash prompt moved pre-flash; bash 3.2 compat fix
-- `src/main.cpp` — serial re-render trigger removed from `loop()`
-- `README.md` — updated Stack section (GxEPD2 → GooDisplay native driver), added releases/frame.sh entries
-- `docs/hardware-reference.md` — added CDI=0x3F precaution (#11)
+- `src/main.cpp` — PSRAM buffer fix: removed all SD I/O from BLE callbacks. `ImageDataCallbacks::onWrite` now `memcpy` into PSRAM only. `ControlCallbacks::onWrite` (COMMIT) sets `gCommitPending` flag. `loop()` detects flag, writes PSRAM buffer to SD, renders, notifies status.
+- `releases/02-ble-sd/bins/` — rebuilt with PSRAM fix
+- `releases/02-ble-sd/src/main.cpp` — updated snapshot
 
 ## Failed Attempts
 
-- Hot re-render via `initDisplay()` call in loop — crashed (double SPI.begin + beginTransaction). Fixed by extracting `epd_reinit()` that skips SPI init.
-- Flashing from `build/` (stale GxEPD2 bins) instead of `.pio/build/esp32-s3-devkitc-1/` — produced wrong timing data.
+- SD write inside BLE callback → `Stack canary watchpoint triggered (btController)` crash. BT controller task stack overflows when SD I/O blocks the BLE task. Fix: PSRAM buffer, all SD I/O in `loop()`.
+- After crash: SD card init fails on reboot (`GO_IDLE_STATE failed`) — needs full power cycle (unplug/replug), not just reset.
 
 ## Next Step
 
-Start BLE image transfer (`02-ble` release):
-1. Add BLE GATT server to dev `src/main.cpp`
-2. Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
-3. 384KB PSRAM receive buffer `gBleReceiveBuf` + offset counter
-4. Image data char (write-no-response): chunk → memcpy → advance offset
-5. Control char: `0x01`=COMMIT → `epd_reinit()` + `PIC_display()` + `EPD_sleep()`; `0x00`=ABORT
-6. Status char (notify): READY/RECEIVING/RENDERING/ERROR
-7. Verify advertising with nRF Connect before touching iOS side
-8. Snapshot stable build → `releases/02-ble/`
+Integrate ditherer + BLE client into main Plink iOS app (tracked: plink-ios#22). FrameTool is the validated prototype — copy `Spectra6Ditherer.swift` and `BLEFrameClient.swift` into Plink target when ready.
