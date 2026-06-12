@@ -14,7 +14,7 @@ using DisplayType = GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HE
 static const char *kImageName = "/image0.bmp";
 
 SPIClass sdSpi(HSPI);
-DisplayType display(GxEPD2_730c_GDEP073E01(kEpdCsPin, /*DC=*/-1, kEpdResetPin, kEpdBusyPin));
+DisplayType display(GxEPD2_730c_GDEP073E01(kEpdCsPin, kEpdDcPin, kEpdResetPin, kEpdBusyPin));
 
 struct BmpHeader {
   uint32_t pixelOffset = 0;
@@ -228,9 +228,8 @@ static void listRootFiles() {
 
 static void initDisplay() {
   initDisplayPowerCtrl();
-  SPI.begin(kEpdSckPin, kEpdMisoPin, kEpdMosiPin, kEpdCsPin);
   display.init(115200);
-  display.setRotation(0);
+  display.setRotation(1);
   display.setFullWindow();
   Serial.printf("Display dimensions: %d x %d\n", display.width(), display.height());
 }
