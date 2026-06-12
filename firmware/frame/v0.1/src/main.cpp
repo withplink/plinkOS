@@ -287,15 +287,5 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available() && gFrameBuffer != nullptr) {
-    while (Serial.available()) Serial.read();  // drain
-    Serial.println("Re-render triggered...");
-    unsigned long t0 = millis();
-    epd_reinit();
-    Serial.printf("EPD init done: %lu ms\n", millis() - t0);
-    PIC_display(gFrameBuffer);
-    EPD_sleep();
-    Serial.printf("Render complete: %lu ms total\n", millis() - t0);
-  }
-  delay(50);
+  delay(1000);
 }

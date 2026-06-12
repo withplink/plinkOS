@@ -103,13 +103,17 @@ case "$action" in
     echo ""
 
     if [[ "$open_monitor" == "y" || "$open_monitor" == "Y" ]]; then
-      echo "Monitor on $PORT @ $BAUD — Ctrl-A Ctrl-\\ to quit."
+      echo "Opening monitor on $PORT @ $BAUD"
+      echo "Quit: Ctrl-A then Ctrl-\\"
+      echo ""
       screen "$PORT" "$BAUD"
     fi
     ;;
 
   2)
-    echo "Monitor on $PORT @ $BAUD — Ctrl-A Ctrl-\\ to quit."
+    echo "Opening monitor on $PORT @ $BAUD"
+    echo "Quit: Ctrl-A then Ctrl-\\"
+    echo ""
     screen "$PORT" "$BAUD"
     ;;
 
