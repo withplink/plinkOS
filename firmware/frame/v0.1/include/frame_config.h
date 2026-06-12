@@ -23,3 +23,12 @@ constexpr int kSdSckPin = 21;
 // Canvas
 constexpr int kFrameWidth = 800;
 constexpr int kFrameHeight = 480;
+
+// EPD init variant. 0 = EPD_init (PLL=0x08), 1 = EPD_init_fast (PLL=0x02).
+// Despite the name, EPD_init produces faster waveform on this panel (~31s vs ~36s hot).
+// "Fast" refers to power-on sequence, not waveform speed. Default 0.
+#define EPD_USE_FAST_INIT 0
+
+// Display rotation. 0 = landscape native (800×480). 1 = portrait, 90° CW (480w × 800h logical).
+// For 90° CCW swap the rotation formula sign in renderBmpFromSd if needed.
+constexpr int kFrameRotation = 1;
