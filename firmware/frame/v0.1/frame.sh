@@ -105,7 +105,7 @@ case "$action" in
     if [[ "$open_monitor" == "y" || "$open_monitor" == "Y" ]]; then
       echo "Opening monitor on $PORT @ $BAUD"
       echo "Quit: Ctrl-A then Ctrl-\\"
-      echo ""
+      read -rp "Press Enter to open: "
       screen "$PORT" "$BAUD"
     fi
     ;;
@@ -113,7 +113,7 @@ case "$action" in
   2)
     echo "Opening monitor on $PORT @ $BAUD"
     echo "Quit: Ctrl-A then Ctrl-\\"
-    echo ""
+    read -rp "Press Enter to open: "
     screen "$PORT" "$BAUD"
     ;;
 
