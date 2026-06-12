@@ -17,13 +17,15 @@ control.
 ## Stack
 
 - Arduino via PlatformIO
-- GxEPD2 for the Spectra 6 panel
+- GooDisplay native driver (`Display_EPD_W21`) — replaces GxEPD2
 - SD card on the board's native SD bus
 
 ## Files
 
-- `src/main.cpp` — first render path
-- `include/frame_config.h` — display and SD pin map in one place
+- `src/main.cpp` — dev firmware (SD render + serial re-render trigger)
+- `include/frame_config.h` — display and SD pin map
+- `releases/` — stable firmware snapshots; each has full source + pre-built `bins/`
+- `flash.sh` — flash tool with numbered release menu and auto port detection
 - `reference/ESP32E6-E01-Schematic-Diagram.pdf` — schematic kept with the firmware for quick
   wiring reference
 
