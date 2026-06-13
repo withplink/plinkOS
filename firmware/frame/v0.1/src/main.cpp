@@ -245,8 +245,13 @@ bool renderBmpFromSd(const char *path) {
   if (!parseBmpHeader(f, hdr)) { f.close(); return false; }
   Serial.printf("BMP: %ldx%ld, %ubpp\n", (long)hdr.width, (long)hdr.height, hdr.bpp);
 
-  const int dw     = (kFrameRotation != 0) ? EPD_HEIGHT : EPD_WIDTH;
-  const int dh     = (kFrameRotation != 0) ? EPD_WIDTH  : EPD_HEIGHT;
+  // Orientation is inferred from the BMP dimensions the app sends — no extra protocol.
+  // Portrait (e.g. 480×800, height > width) is rotated 90°CW onto the native 800×480
+  // panel; landscape (800×480) renders directly. See kFrameRotation note in frame_config.h.
+  const bool rotate = (hdr.height > hdr.width);
+
+  const int dw     = rotate ? EPD_HEIGHT : EPD_WIDTH;
+  const int dh     = rotate ? EPD_WIDTH  : EPD_HEIGHT;
   const int xOff   = (dw - hdr.width)  / 2;
   const int yOff   = (dh - hdr.height) / 2;
   const int rowSize = ((hdr.width * 3 + 3) / 4) * 4;
@@ -278,7 +283,7 @@ bool renderBmpFromSd(const char *path) {
   heap_caps_free(row);
   f.close();
 
-  if (kFrameRotation != 0) {
+  if (rotate) {
     uint8_t *physFb = (uint8_t *)heap_caps_malloc(fbBytes, MALLOC_CAP_SPIRAM);
     if (!physFb) { Serial.println("Rotation buffer alloc failed"); heap_caps_free(fb); return false; }
     for (int lx = 0; lx < EPD_WIDTH; lx++)

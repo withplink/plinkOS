@@ -30,8 +30,10 @@ constexpr int kFrameHeight = 480;
 // "Fast" refers to power-on sequence, not waveform speed. Default 0.
 #define EPD_USE_FAST_INIT 0
 
-// Display rotation. 0 = landscape native (800×480). 1 = portrait, 90° CW (480w × 800h logical).
-// For 90° CCW swap the rotation formula sign in renderBmpFromSd if needed.
+// Display rotation. SUPERSEDED: renderBmpFromSd now infers rotation from the BMP
+// dimensions the app sends (portrait height>width → rotate 90°CW; landscape → native),
+// so orientation is controlled per-image by the app with no extra protocol. Kept for
+// reference / 90° CCW formula tweaks. 0 = landscape native, 1 = portrait 90°CW.
 constexpr int kFrameRotation = 1;
 
 // BLE GATT UUIDs
