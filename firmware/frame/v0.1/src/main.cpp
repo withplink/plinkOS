@@ -7,6 +7,8 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <Preferences.h>
+#include <esp_gap_ble_api.h>
 
 #include "Display_EPD_W21.h"
 #include "Display_EPD_W21_spi.h"
@@ -18,6 +20,8 @@ SPIClass sdSpi(HSPI);
 
 static uint8_t *gFrameBuffer  = nullptr;
 static BLECharacteristic *gStatusChar = nullptr;
+static Preferences gPrefs;
+static std::string gFrameName;   // canonical frame name, persisted in NVS
 static volatile bool gBleConnected   = false;
 static volatile bool gBleReceiving   = false;
 static volatile bool gRendering      = false;
@@ -30,6 +34,7 @@ static const size_t kBleBufferMax = 1300000; // 1.3 MB (BMP ≈ 1.15 MB)
 
 static void epd_reinit();
 bool renderBmpFromSd(const char *path);
+static void applyAdvertising();
 
 // ── BLE helpers ──────────────────────────────────────────────────────────────
 
@@ -119,8 +124,57 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+// Frame name — canonical on the device, persisted in NVS, set by the app over BLE.
+class NameCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pChar) override {
+    size_t n = pChar->getLength();
+    if (n == 0) return;
+    std::string name((const char *)pChar->getData(), n);
+    gFrameName = name;
+    gPrefs.begin("frame", false);
+    gPrefs.putString("name", gFrameName.c_str());
+    gPrefs.end();
+    pChar->setValue(gFrameName);
+    // Update the connected-device GAP name…
+    esp_ble_gap_set_device_name(gFrameName.c_str());
+    // …and rebuild the advertising/scan-response payload so the new name actually
+    // broadcasts. The app disconnects right after this write; onDisconnect →
+    // startAdvertising() then sends the rebuilt scan-response — no reboot needed (#2).
+    // (Without this, BLEAdvertising replays the name bytes cached at init.)
+    applyAdvertising();
+    Serial.printf("BLE: frame renamed to '%s' (advertising rebuilt)\n", gFrameName.c_str());
+  }
+};
+
+// Build the advertising payload from the current gFrameName. The frame name rides in the
+// scan-response packet; the 128-bit service UUID is the primary-adv capability gate. Setting
+// the name explicitly (vs relying on BLEAdvertising's default device-name include) lets a
+// rename rebuild it live — the default caches the init-time name and startAdvertising()
+// replays stale bytes, so the old name kept broadcasting until reboot (#2). Does not start
+// advertising; callers start (initBle) or rely on onDisconnect → startAdvertising() (rename).
+static void applyAdvertising() {
+  BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+  pAdv->stop();
+
+  BLEAdvertisementData advData;
+  advData.setFlags(0x06);  // LE General Discoverable, BR/EDR not supported
+  advData.setCompleteServices(BLEUUID(BLE_SERVICE_UUID));
+  pAdv->setAdvertisementData(advData);
+
+  BLEAdvertisementData scanResp;
+  scanResp.setName(gFrameName);
+  pAdv->setScanResponseData(scanResp);
+
+  pAdv->setMinPreferred(0x06);
+}
+
 static void initBle() {
-  BLEDevice::init(BLE_DEVICE_NAME);
+  // Load the persisted name (default to the build-time name on first boot).
+  gPrefs.begin("frame", true);
+  gFrameName = std::string(gPrefs.getString("name", BLE_DEVICE_NAME).c_str());
+  gPrefs.end();
+
+  BLEDevice::init(gFrameName);
   BLEDevice::setMTU(512);
 
   BLEServer *pServer = BLEDevice::createServer();
@@ -151,14 +205,19 @@ static void initBle() {
   uint8_t initStatus = kBleStatusReady;
   gStatusChar->setValue(&initStatus, 1);
 
+  // Name — READ (app syncs canonical name) + WRITE (app renames, persisted to NVS)
+  BLECharacteristic *pNameChar = pService->createCharacteristic(
+    BLE_NAME_CHAR_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
+  );
+  pNameChar->setValue(gFrameName);
+  pNameChar->setCallbacks(new NameCallbacks());
+
   pService->start();
 
-  BLEAdvertising *pAdv = BLEDevice::getAdvertising();
-  pAdv->addServiceUUID(BLE_SERVICE_UUID);
-  pAdv->setScanResponse(true);
-  pAdv->setMinPreferred(0x06);
+  applyAdvertising();
   BLEDevice::startAdvertising();
-  Serial.println("BLE advertising as '" BLE_DEVICE_NAME "'");
+  Serial.printf("BLE advertising as '%s'\n", gFrameName.c_str());
 }
 
 // ── BMP / display (unchanged from 01-sd-display) ─────────────────────────────

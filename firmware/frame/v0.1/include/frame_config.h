@@ -42,6 +42,7 @@ constexpr int kFrameRotation = 1;
 #define BLE_IMG_DATA_CHAR_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define BLE_CONTROL_CHAR_UUID  "cba1d466-344c-4be3-ab3f-189f80dd7518"
 #define BLE_STATUS_CHAR_UUID   "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0b1d"
+#define BLE_NAME_CHAR_UUID     "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0c2e"  // READ+WRITE, frame name (NVS-backed)
 
 // BLE control opcodes
 constexpr uint8_t kBleCommit = 0x01;
