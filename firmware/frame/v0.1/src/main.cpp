@@ -237,6 +237,7 @@ bool renderBmpFromSd(const char *path) {
     gFrameBuffer = nullptr;
   }
 
+  uint32_t tDecodeStart = millis();
   File f = SD.open(path, FILE_READ);
   if (!f) { Serial.printf("Failed to open: %s\n", path); return false; }
 
@@ -291,8 +292,12 @@ bool renderBmpFromSd(const char *path) {
     Serial.println("BMP decoded — rendering...");
   }
 
+  Serial.printf("BMP decode: %u ms\n", millis() - tDecodeStart);
+
+  uint32_t tWaveStart = millis();
   PIC_display(gFrameBuffer);
   EPD_sleep();
+  Serial.printf("EPD waveform: %u ms\n", millis() - tWaveStart);
   Serial.println("Render complete");
   return true;
 }
@@ -386,6 +391,7 @@ void loop() {
     gRendering = true;
 
     Serial.printf("loop: writing %zu bytes to SD...\n", gBleBufferLen);
+    uint32_t tSdStart = millis();
     SD.remove(kImageName);
     File f = SD.open(kImageName, FILE_WRITE);
     bool sdOk = false;
@@ -394,7 +400,8 @@ void loop() {
       f.flush();
       f.close();
       sdOk = (written == gBleBufferLen);
-      Serial.printf("SD write: %zu/%zu bytes %s\n", written, gBleBufferLen, sdOk ? "OK" : "INCOMPLETE");
+      Serial.printf("SD write: %zu/%zu bytes %s [%u ms]\n",
+                    written, gBleBufferLen, sdOk ? "OK" : "INCOMPLETE", millis() - tSdStart);
     } else {
       Serial.println("loop: SD open for write failed");
     }
@@ -408,7 +415,9 @@ void loop() {
       notifyStatus(kBleStatusError);
     } else {
       notifyStatus(kBleStatusRendering);
+      uint32_t tInitStart = millis();
       epd_reinit();
+      Serial.printf("EPD init: %u ms\n", millis() - tInitStart);
       bool ok = renderBmpFromSd(kImageName);
       gRendering = false;
       notifyStatus(ok ? kBleStatusReady : kBleStatusError);
