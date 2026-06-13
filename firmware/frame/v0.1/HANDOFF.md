@@ -21,26 +21,19 @@ See `docs/products/frame/v0.1/parity-gap-audit.md` and architecture build-strate
 - Validate on hardware **before** committing (build-verify alone is not enough).
 - Promote when stable: `git mv staging/<name> releases/NN-<name>`, retitle README, commit.
 
-## Current dev build: `staging/dev` (NOT YET STABLE)
+## Current stable build: `releases/03-ble-name` (STABLE — promoted 2026-06-13)
 
-Rolling unvalidated build on top of `releases/02-ble-sd`. Contains:
-1. **Dimension-driven orientation** — `renderBmpFromSd` rotates portrait BMP (h>w) 90°CW; landscape
-   (800×480) renders direct. ⚠️ see Bug #1 — the orientation *model* is wrong.
-2. **Frame name on ESP** — NVS-persisted, READ+WRITE `BLE_NAME_CHAR_UUID` (`…0c2e`), name in
-   scan-response; live re-advertise on rename (Bug #2 ✅ fixed). App writes name over BLE.
-3. Render-pipeline timing logs.
+Promoted from `staging/dev` after stable-03 (all bugs #1–#8 fixed + HW-validated). On top of
+`releases/02-ble-sd`. Contains:
+1. **Frame name on ESP** — NVS-persisted, READ+WRITE `BLE_NAME_CHAR_UUID` (`…0c2e`), name in
+   scan-response; live re-advertise on rename (Bug #2). App writes name over BLE.
+2. **App-side orientation** — firmware rotation removed; renders panel-native 800×480 directly
+   (Bug #1). `staging/` is now empty; new dev work recreates `staging/dev` via `build-dev.sh`.
 
-## Uncommitted work (BOTH repos — nothing below is committed; persists on disk)
+## State — everything committed + pushed
 
-**plinkOS** (firmware): `src/main.cpp` (name-on-ESP: NVS + name char + `esp_ble_gap_set_device_name`),
-`include/frame_config.h` (`BLE_NAME_CHAR_UUID`), `frame.sh` (staging support), `staging/dev/` (new).
-Already committed+pushed: `dd85c81` orientation (rotation-from-dims), `e148b8d` timing logs.
-
-**plink-ios** (FrameTool): modified `ContentView.swift`, `CropView.swift`, `FrameScanner.swift`,
-`FrameStore.swift`, `Spectra6Ditherer.swift`; new `FrameConfigClient.swift`, `SettingsView.swift`.
-Already committed+pushed (foundation/LA/bg): `814fa08`, `b4f56c1`, `bbd1abe`, `827bd4f`.
-NOTE: the iOS **orientation** commit was denied earlier → orientation changes are part of this
-uncommitted set, not yet on remote (firmware orientation `dd85c81` IS on remote — mismatch).
+- All this-session work committed + pushed (plink-ios + plinkOS), root submodule pointers bumped.
+- Stable-03 firmware lives in `releases/03-ble-name` (this commit promotes it).
 
 Both apps build clean (`xcodebuild FrameTool` + `pio run` both SUCCEED). Validate-first → not committed.
 
@@ -127,15 +120,14 @@ Two frames nearby (single-frame scope — fine for now).
 - Queue-era: orientation vs stored images — re-push from phone vs firmware-rotate (logged plinkOS#31).
 
 ## Next steps (next session)
-**ALL stable-03 bugs (#1–#8) fixed + HW-validated.** Ready to promote.
-1. Re-run full checklist (`docs/products/frame/v0.1/parity-gap-audit.md` + this HANDOFF) on hardware
-   as a final pass on the fresh flash.
-2. Promote `staging/dev` → `releases/03-…`: rebuild with `./build-dev.sh`, `mv`/`git add` into
-   `releases/`, retitle README, commit firmware + iOS, bump root submodule pointers.
-3. Then remaining v0.1: battery (PARKED — battery-sense method TBD: IP5306 I2C vs ADC pin), queue
-   slice (fw#31 + ios#26). Follow-ups: proactive idle-screen offline indicator (#3 liveness ping);
-   app reads name char on connect to reconcile cached name vs frame NVS.
-   (`build-dev.sh` keeps `staging/dev` src+bins in sync with top-level — run it before flash/promote.)
+**Stable-03 DONE + promoted to `releases/03-ble-name`.** Final checklist pass was waived (each bug
+validated individually this session).
+1. Remaining v0.1 P0: queue slice (fw#31 + ios#26 — needs BLE queue protocol + SD layout; see the
+   orientation-lock note on #31), then battery (PARKED — battery-sense method TBD: IP5306 I2C vs ADC).
+2. Follow-ups (non-blocking): proactive idle-screen offline indicator (#3 liveness ping); app reads
+   name char on connect to reconcile cached name vs frame NVS.
+3. Dev-build reminder: `build-dev.sh` rebuilds top-level `src/` + syncs into a fresh `staging/dev`
+   (run before flashing a staging build — avoids the stale-bins trap).
 
 ## Reference
 - Status bytes (`frame_config.h`): `0x00` Ready, `0x01` Receiving, `0x02` Rendering, `0xFF` Error.
