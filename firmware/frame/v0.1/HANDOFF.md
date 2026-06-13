@@ -19,8 +19,8 @@ See `docs/products/frame/v0.1/parity-gap-audit.md` and architecture build-strate
 Rolling unvalidated build on top of `releases/02-ble-sd`. Contains:
 1. **Dimension-driven orientation** — `renderBmpFromSd` rotates portrait BMP (h>w) 90°CW; landscape
    (800×480) renders direct. ⚠️ see Bug #1 — the orientation *model* is wrong.
-2. **Frame name on ESP** — NVS-persisted, advertised as GAP name, READ+WRITE `BLE_NAME_CHAR_UUID`
-   (`…0c2e`). App writes name over BLE. ⚠️ see Bug #2 — live re-advertise doesn't work.
+2. **Frame name on ESP** — NVS-persisted, READ+WRITE `BLE_NAME_CHAR_UUID` (`…0c2e`), name in
+   scan-response; live re-advertise on rename (Bug #2 ✅ fixed). App writes name over BLE.
 3. Render-pipeline timing logs.
 
 ## Uncommitted work (BOTH repos — nothing below is committed; persists on disk)
@@ -45,7 +45,7 @@ Both apps build clean (`xcodebuild FrameTool` + `pio run` both SUCCEED). Validat
 | Signal flap fix (no allowDuplicates) | ✅ | ~ (no complaint; reverify) |
 | Core send + render (regression) | ✅ | ✅ works |
 | Orientation crop+dither+render | ✅ | ⚠️ renders but MODEL wrong (Bug #1) |
-| Name on ESP (NVS + write char) | ✅ | ⚠️ NVS ok, advertise broken (Bug #2) |
+| Name on ESP (NVS + write char) | ✅ | ✅ NVS + live re-advertise (Bug #2 fixed) |
 | Settings sheet (orientation, rename, unpair) | ✅ | ✅ mostly; rename hangs if frame off (Bug #5) |
 | Live Activity (timer-estimate render bar) | ✅ | ✅ works, better than in-app bar |
 | beginBackgroundTask send guard | ✅ | ✅ (earlier session) |
@@ -59,12 +59,17 @@ mode renders **sideways**. Correct (Pi-plink) behavior: orientation = the frame'
 rotated sideways. Rethink: orientation should describe the mount, app crops/letterboxes to it, and
 firmware renders upright relative to mount. Decide the model before reworking.
 
-**#2 — Frame name live re-advertise fails.** Rename → reinstall app (frame NOT rebooted) → discovery
-still showed old "Plink Frame". `esp_ble_gap_set_device_name()` did not update the advertised/scan-
-response name without reboot. After power-cycle, NVS name advertises (confirmed via unpair→discovery
-showing new name). Fix: explicitly rebuild advertising data / restart advertising with new name on
-rename, OR accept reboot-to-apply. (App display while paired uses local cache, so it looks right
-until reinstall clears the cache.)
+**#2 — Frame name live re-advertise fails. ✅ FIXED (HW-validated).** Two-part fix, both required:
+- **Firmware** (`main.cpp`): build adv + scan-response explicitly from `gFrameName` via
+  `applyAdvertising()` (name in scan response) instead of BLEAdvertising's default device-name
+  include, which cached the init-time name so `startAdvertising()` replayed stale bytes. Rebuilt in
+  `NameCallbacks` on rename → app disconnects → `onDisconnect`→`startAdvertising()` sends new name.
+  (nRF Connect confirmed the firmware was already broadcasting the fresh name.)
+- **iOS** (`FrameScanner.swift`): prefer `CBAdvertisementDataLocalNameKey` (live scan-response name)
+  over `peripheral.name` (sticky bluetoothd cache, survives app delete); scan with
+  `allowDuplicates` so the scan-response packet arrives + refreshes the name (RSSI frozen → no flap).
+  Without this it took a second unpair to pick up the new name.
+Result: rename → single unpair → new name in discovery, no reboot, no flap.
 
 **#3 — Frame-off not detected. ✅ FIXED (HW-validated).** Upload-stuck-on-connecting killed by the
 15s scan→connect→discover timeout in `BLEFrameClient` (shared with #4). NOTE: full proactive
@@ -111,17 +116,18 @@ Two frames nearby (single-frame scope — fine for now); orientation render coul
 
 ## Open design questions
 - **Orientation model** (Bug #1) — mount-orientation + letterbox vs per-image rotation. Blocks orientation.
-- **Name advertise** (Bug #2) — live adv rebuild vs reboot-to-apply.
 
 ## Next steps (next session)
 1. Resolve orientation model (Bug #1) — decide, then rework firmware render + app crop/letterbox.
-2. Fix name advertise (Bug #2) — explicit advertising restart with new name.
-3. iOS bugs #3/#4/#5/#6 (connection robustness) + #7 (render-bar drift) + #8 (LA update race) —
-   ✅ ALL DONE (HW-validated). Follow-up only: proactive idle-screen offline indicator (#3 liveness
-   ping). Remaining stable-03 blockers are firmware-side: #1 orientation, #2 name advertise.
-5. Re-run full checklist (`docs/products/frame/v0.1/parity-gap-audit.md` + this HANDOFF) on hardware.
-6. When green: promote `staging/dev` → `releases/03-…`, commit firmware + iOS, bump root pointers.
-7. Then remaining v0.1: battery (PARKED — needs battery-sense method: IP5306 I2C vs ADC pin), queue
+   **This is the LAST remaining stable-03 blocker** — all other bugs (#2–#8) fixed + HW-validated.
+2. iOS bugs #3/#4/#5/#6 (connection robustness) + #7 (render-bar drift) + #8 (LA update race) +
+   #2 (name re-advertise, fw+iOS) — ✅ ALL DONE (HW-validated). Follow-up only: proactive idle-screen
+   offline indicator (#3 liveness ping).
+3. Re-run full checklist (`docs/products/frame/v0.1/parity-gap-audit.md` + this HANDOFF) on hardware.
+4. When green: promote `staging/dev` → `releases/03-…`, commit firmware + iOS, bump root pointers.
+   NOTE: `staging/dev/src` snapshot is STALE vs top-level `src/` (top-level is the build source +
+   has all fixes); reconcile or rebuild staging from top-level before promoting.
+5. Then remaining v0.1: battery (PARKED — needs battery-sense method: IP5306 I2C vs ADC pin), queue
    slice (fw#31 + ios#26 — needs BLE queue protocol design + SD layout).
 
 ## Reference
