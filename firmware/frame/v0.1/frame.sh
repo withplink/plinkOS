@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASES_DIR="$SCRIPT_DIR/releases"
+STAGING_DIR="$SCRIPT_DIR/staging"   # unvalidated builds; promote to releases/ once confirmed
 CHIP="esp32s3"
 BAUD=115200
 
@@ -48,15 +49,26 @@ case "$action" in
     for d in "$RELEASES_DIR"/*/; do
       [[ -d "$d" ]] && releases+=("${d%/}")
     done
+    # Staging builds: flashable but unvalidated. Tagged [TEMP]; promote to releases/ once confirmed.
+    if [[ -d "$STAGING_DIR" ]]; then
+      for d in "$STAGING_DIR"/*/; do
+        [[ -d "$d" ]] && releases+=("${d%/}")
+      done
+    fi
 
     if [[ ${#releases[@]} -eq 0 ]]; then
-      echo "No releases found in $RELEASES_DIR"
+      echo "No firmware found in $RELEASES_DIR or $STAGING_DIR"
       exit 1
     fi
 
     echo "Select firmware:"
     for i in "${!releases[@]}"; do
-      echo "  $((i+1))) $(basename "${releases[$i]}")"
+      name="$(basename "${releases[$i]}")"
+      if [[ "${releases[$i]}" == "$STAGING_DIR"/* ]]; then
+        echo "  $((i+1))) $name  [TEMP — unvalidated]"
+      else
+        echo "  $((i+1))) $name"
+      fi
     done
     echo ""
     read -rp "Select [1-${#releases[@]}]: " choice
