@@ -30,11 +30,11 @@ constexpr int kFrameHeight = 480;
 // "Fast" refers to power-on sequence, not waveform speed. Default 0.
 #define EPD_USE_FAST_INIT 0
 
-// Display rotation. SUPERSEDED: renderBmpFromSd now infers rotation from the BMP
-// dimensions the app sends (portrait height>width → rotate 90°CW; landscape → native),
-// so orientation is controlled per-image by the app with no extra protocol. Kept for
-// reference / 90° CCW formula tweaks. 0 = landscape native, 1 = portrait 90°CW.
-constexpr int kFrameRotation = 1;
+// Display rotation. SUPERSEDED (twice): rotation is now done entirely in the app, which
+// always sends a panel-native 800×480 BMP already rotated for the mount. The firmware
+// renders it directly — no rotation here, no orientation protocol. Constant kept for
+// reference only; not used by renderBmpFromSd.
+constexpr int kFrameRotation = 0;
 
 // BLE GATT UUIDs
 #define BLE_DEVICE_NAME       "Plink Frame"
