@@ -9,8 +9,15 @@ See `docs/products/frame/v0.1/parity-gap-audit.md` and architecture build-strate
 ## Build / flash workflow (IMPORTANT)
 
 - User flashes **only via `frame.sh`** (plink root → execs `firmware/frame/v0.1/frame.sh`).
-- `frame.sh` scans `releases/` (stable) + `staging/` (unvalidated, tagged `[TEMP]`).
-- Build bins: `cd firmware/frame/v0.1 && ~/.local/bin/pio run` → `.pio/build/esp32-s3-devkitc-1/*.bin`.
+- `frame.sh` scans `releases/` (stable) + `staging/` (unvalidated, tagged `[TEMP]`) and flashes the
+  selected dir's `bins/`.
+- ⚠️ **CRITICAL GOTCHA:** `pio run` writes `.pio/build/`, but `frame.sh` flashes
+  `staging/dev/bins/`. **Nothing auto-syncs them.** Editing `src/` + running `pio run` + flashing
+  silently flashes STALE bins (this cost a whole session — orientation + NVS-log edits never reached
+  the frame; symptom = expected new Serial logs simply absent at boot).
+- **ALWAYS build the dev firmware with `./build-dev.sh`** (runs `pio run` + copies fresh bins AND
+  the src snapshot into `staging/dev/`). Then `frame.sh` → Flash → dev. Never `pio run` alone before
+  a staging flash.
 - Validate on hardware **before** committing (build-verify alone is not enough).
 - Promote when stable: `git mv staging/<name> releases/NN-<name>`, retitle README, commit.
 
@@ -44,7 +51,7 @@ Both apps build clean (`xcodebuild FrameTool` + `pio run` both SUCCEED). Validat
 | Discovery / pair / persistence (single frame) | ✅ | ✅ pairs, shows name |
 | Signal flap fix (no allowDuplicates) | ✅ | ~ (no complaint; reverify) |
 | Core send + render (regression) | ✅ | ✅ works |
-| Orientation crop+dither+render | ✅ | ⚠️ renders but MODEL wrong (Bug #1) |
+| Orientation (app-side rotation, 3 mounts) | ✅ | ✅ all 3 mounts upright (Bug #1 fixed) |
 | Name on ESP (NVS + write char) | ✅ | ✅ NVS + live re-advertise (Bug #2 fixed) |
 | Settings sheet (orientation, rename, unpair) | ✅ | ✅ mostly; rename hangs if frame off (Bug #5) |
 | Live Activity (timer-estimate render bar) | ✅ | ✅ works, better than in-app bar |
@@ -52,12 +59,14 @@ Both apps build clean (`xcodebuild FrameTool` + `pio run` both SUCCEED). Validat
 
 ## BUGS FOUND THIS SESSION (block stable-03)
 
-**#1 — Orientation model is wrong (DESIGN DECISION NEEDED).**
-Current: firmware rotates by BMP dims, so a portrait-cropped image sent while app is in Landscape
-mode renders **sideways**. Correct (Pi-plink) behavior: orientation = the frame's **physical mount**
-(how it hangs); a mismatched-aspect image is **letterboxed (white bars), kept upright**, never
-rotated sideways. Rethink: orientation should describe the mount, app crops/letterboxes to it, and
-firmware renders upright relative to mount. Decide the model before reworking.
+**#1 — Orientation model. ✅ FIXED (HW-validated).** Resolved via the **app-side rotation** model:
+orientation = per-frame physical MOUNT (`landscape` / `portraitLeft` / `portraitRight`). App
+crops-to-fill the visible canvas, dithers, and BAKES the mount rotation into a panel-native 800×480
+BMP; firmware renders it directly (rotation + rotation PSRAM buffer removed). Both portrait mounts
+are 480×800 visible → indistinguishable by dims, so rotation MUST live app-side. Validated: all three
+mounts render upright. CONSEQUENCE (logged on plinkOS#31): stored BMPs are orientation-locked — a
+mount change won't re-rotate already-stored queue images; decide re-push vs firmware-rotate when the
+queue is designed.
 
 **#2 — Frame name live re-advertise fails. ✅ FIXED (HW-validated).** Two-part fix, both required:
 - **Firmware** (`main.cpp`): build adv + scan-response explicitly from `gFrameName` via
@@ -111,24 +120,22 @@ Core send/render; Live Activity render-during-lock (clears on reopen); force-kil
 returns to "choose photo" (expected — frame renders autonomously); Disconnected error dialog shows.
 
 ## Still untested
-Two frames nearby (single-frame scope — fine for now); orientation render couldn't be judged clearly
-(ambiguous test photos) — moot until Bug #1 redesign.
+Two frames nearby (single-frame scope — fine for now).
 
 ## Open design questions
-- **Orientation model** (Bug #1) — mount-orientation + letterbox vs per-image rotation. Blocks orientation.
+- (none blocking stable-03 — all resolved)
+- Queue-era: orientation vs stored images — re-push from phone vs firmware-rotate (logged plinkOS#31).
 
 ## Next steps (next session)
-1. Resolve orientation model (Bug #1) — decide, then rework firmware render + app crop/letterbox.
-   **This is the LAST remaining stable-03 blocker** — all other bugs (#2–#8) fixed + HW-validated.
-2. iOS bugs #3/#4/#5/#6 (connection robustness) + #7 (render-bar drift) + #8 (LA update race) +
-   #2 (name re-advertise, fw+iOS) — ✅ ALL DONE (HW-validated). Follow-up only: proactive idle-screen
-   offline indicator (#3 liveness ping).
-3. Re-run full checklist (`docs/products/frame/v0.1/parity-gap-audit.md` + this HANDOFF) on hardware.
-4. When green: promote `staging/dev` → `releases/03-…`, commit firmware + iOS, bump root pointers.
-   NOTE: `staging/dev/src` snapshot is STALE vs top-level `src/` (top-level is the build source +
-   has all fixes); reconcile or rebuild staging from top-level before promoting.
-5. Then remaining v0.1: battery (PARKED — needs battery-sense method: IP5306 I2C vs ADC pin), queue
-   slice (fw#31 + ios#26 — needs BLE queue protocol design + SD layout).
+**ALL stable-03 bugs (#1–#8) fixed + HW-validated.** Ready to promote.
+1. Re-run full checklist (`docs/products/frame/v0.1/parity-gap-audit.md` + this HANDOFF) on hardware
+   as a final pass on the fresh flash.
+2. Promote `staging/dev` → `releases/03-…`: rebuild with `./build-dev.sh`, `mv`/`git add` into
+   `releases/`, retitle README, commit firmware + iOS, bump root submodule pointers.
+3. Then remaining v0.1: battery (PARKED — battery-sense method TBD: IP5306 I2C vs ADC pin), queue
+   slice (fw#31 + ios#26). Follow-ups: proactive idle-screen offline indicator (#3 liveness ping);
+   app reads name char on connect to reconcile cached name vs frame NVS.
+   (`build-dev.sh` keeps `staging/dev` src+bins in sync with top-level — run it before flash/promote.)
 
 ## Reference
 - Status bytes (`frame_config.h`): `0x00` Ready, `0x01` Receiving, `0x02` Rendering, `0xFF` Error.
