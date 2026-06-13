@@ -83,6 +83,22 @@ once characteristics resolve (transfer start), on fail, and in reset.
 "Retry" (re-sends stored `flow.pendingBmp`, no re-crop/dither) + "Cancel". `AppFlow.pendingBmp`
 always holds the most recent send attempt.
 
+**#7 — In-app render bar drifts on background. ✅ FIXED (HW-validated).** Render bar now derived
+from wall-clock elapsed since `BLEFrameClient.renderStartedAt` (set at COMMIT) instead of a
+foreground-only per-tick accumulator, so suspended seconds count and it no longer snaps to done
+early. Estimate 40→45s to match Live Activity.
+
+**#8 — Live Activity stuck at "Sending photo… 100%", never flips to Rendering.** Lock/minimise right
+as send completes → LA frozen on `.sending` phase, progress 1.0 (orange bar full, "Sending photo…").
+ROOT CAUSE: in `BLEFrameClient.sendNextChunk` the final chunk fires BOTH `liveActivity.updateTransfer(1.0)`
+and (right after, at COMMIT) `liveActivity.beginRender()`. Each spawns an **independent unordered**
+`Task { await activity.update(...) }` (see `FrameLiveActivity.swift`). No ordering guarantee → the
+`.rendering` update can land first, then the trailing `.sending(1.0)` update clobbers it back. Locking
+freezes whatever landed last. FIX OPTIONS: (a) skip `updateTransfer` on the final chunk
+(`offset >= count`) since `beginRender` immediately supersedes it, and/or (b) serialize all LA updates
+through one ordered actor/task queue so a later call can't be overtaken by an earlier one. NOTE: the
+"allow Live Activities from FrameTool?" lock-screen prompt is iOS periodic re-consent, not a bug.
+
 **#7 (P1) — In-app render bar drifts on background.** `SendProgressView` render timer pauses while
 suspended and resumes from the paused %, so it can hit "done" at ~75%. Live Activity (timer-interval)
 behaves correctly. Reconcile the in-app bar the same way (wall-clock interval, not a paused ticker).
@@ -102,9 +118,10 @@ Two frames nearby (single-frame scope — fine for now); orientation render coul
 ## Next steps (next session)
 1. Resolve orientation model (Bug #1) — decide, then rework firmware render + app crop/letterbox.
 2. Fix name advertise (Bug #2) — explicit advertising restart with new name.
-3. Bug #7 — reconcile in-app render bar to wall-clock interval (drifts on background).
-4. Connection robustness #3/#4/#5/#6 — ✅ DONE (HW-validated). Follow-up only: proactive idle-screen
-   offline indicator (#3 liveness ping).
+3. Bug #8 — Live Activity stuck at "Sending… 100%" on lock (unordered LA update race). Fix:
+   skip final-chunk `updateTransfer` and/or serialize LA updates.
+4. Connection robustness #3/#4/#5/#6 + render-bar drift #7 — ✅ DONE (HW-validated). Follow-up only:
+   proactive idle-screen offline indicator (#3 liveness ping).
 5. Re-run full checklist (`docs/products/frame/v0.1/parity-gap-audit.md` + this HANDOFF) on hardware.
 6. When green: promote `staging/dev` → `releases/03-…`, commit firmware + iOS, bump root pointers.
 7. Then remaining v0.1: battery (PARKED — needs battery-sense method: IP5306 I2C vs ADC pin), queue
