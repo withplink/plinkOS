@@ -43,13 +43,41 @@ constexpr int kFrameRotation = 0;
 #define BLE_CONTROL_CHAR_UUID  "cba1d466-344c-4be3-ab3f-189f80dd7518"
 #define BLE_STATUS_CHAR_UUID   "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0b1d"
 #define BLE_NAME_CHAR_UUID     "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0c2e"  // READ+WRITE, frame name (NVS-backed)
+#define BLE_QUEUE_CHAR_UUID    "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0d3f"  // READ, frame-canonical queue.json
+#define BLE_ASSET_OUT_CHAR_UUID "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0e40" // READ, asset bytes streamed frame→app (long read)
 
-// BLE control opcodes
-constexpr uint8_t kBleCommit = 0x01;
-constexpr uint8_t kBleAbort  = 0x00;
+// ── BLE control opcodes ──────────────────────────────────────────────────────
+// The control characteristic (WRITE w/ response) carries a 1-byte opcode + payload.
+// Stream framing:
+constexpr uint8_t kBleAbort       = 0x00;  // discard the in-flight stream buffer
+constexpr uint8_t kBleCommit      = 0x01;  // finalize the streamed asset → SD (routed by kind)
+constexpr uint8_t kBleBeginAsset  = 0x10;  // [kind:1][id:4 LE] — start a tagged asset stream
+// Queue ops (port the Pi /api/queue/* set; frame owns queue.json):
+constexpr uint8_t kBleAdd         = 0x20;  // [show_now:1][id:4 LE][labelLen:1][label][assetId]
+constexpr uint8_t kBleRemove      = 0x21;  // [idx:1]
+constexpr uint8_t kBleReorder     = 0x22;  // [n:1][order bytes…]
+constexpr uint8_t kBleShow        = 0x23;  // [idx:1]
+constexpr uint8_t kBleNext        = 0x24;  // (no payload)
+constexpr uint8_t kBleInterval    = 0x25;  // [minutes:2 LE]  (0 = auto-rotate off)
+constexpr uint8_t kBleRename      = 0x26;  // [idx:1][label…]
+constexpr uint8_t kBleList        = 0x27;  // refresh queue char + dirty-notify
+constexpr uint8_t kBleGetAsset    = 0x28;  // [kind:1][id:4 LE] → asset-out char = 4-byte LE length
+constexpr uint8_t kBleGetChunk    = 0x29;  // [offset:4 LE][len:2 LE] → asset-out char = that slice
+constexpr uint8_t kBleClear       = 0x2A;  // wipe the whole queue + all assets on SD
+
+// Asset kinds (kBleBeginAsset / kBleGetAsset payload)
+constexpr uint8_t kAssetBmp   = 0x00;  // 800×480 panel-native display BMP → /img/<id>.bmp
+constexpr uint8_t kAssetJpeg  = 0x01;  // ~1600×960 recrop master JPEG    → /orig/<id>.jpg
+constexpr uint8_t kAssetThumb = 0x02;  // ~200px list thumbnail JPEG       → /thumb/<id>.jpg
 
 // BLE status values (sent via NOTIFY)
-constexpr uint8_t kBleStatusReady     = 0x00;
-constexpr uint8_t kBleStatusReceiving = 0x01;
-constexpr uint8_t kBleStatusRendering = 0x02;
-constexpr uint8_t kBleStatusError     = 0xFF;
+constexpr uint8_t kBleStatusReady        = 0x00;
+constexpr uint8_t kBleStatusReceiving    = 0x01;
+constexpr uint8_t kBleStatusRendering    = 0x02;
+constexpr uint8_t kBleStatusQueueDirty   = 0x10;  // queue.json changed → app re-reads queue char
+constexpr uint8_t kBleStatusAssetReady   = 0x11;  // requested asset loaded → app reads asset-out char
+constexpr uint8_t kBleStatusAssetMissing = 0x12;  // requested asset not on SD
+constexpr uint8_t kBleStatusError        = 0xFF;
+
+// Queue limits (v0.1)
+constexpr int kMaxQueueItems = 64;  // reorder order[] cap; realistic v0.1 gallery is far smaller

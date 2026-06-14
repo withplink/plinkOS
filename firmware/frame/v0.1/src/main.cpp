@@ -9,32 +9,93 @@
 #include <BLE2902.h>
 #include <Preferences.h>
 #include <esp_gap_ble_api.h>
+#include <ArduinoJson.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 #include "Display_EPD_W21.h"
 #include "Display_EPD_W21_spi.h"
 #include "frame_config.h"
 
-static const char *kImageName = "/image0.bmp";
+// Legacy single-image path (pre-queue firmware). Kept as a boot fallback so a frame that
+// only ever received the old "send one image" flow still shows its last image.
+static const char *kLegacyImage = "/image0.bmp";
+
+// Frame-canonical gallery storage (v0.1 gallery model). See docs/products/frame/v0.1/gallery-model.md
+static const char *kQueueFile = "/queue.json";
+static const char *kImgDir    = "/img";    // panel-native display BMPs   (/img/<id>.bmp)
+static const char *kOrigDir   = "/orig";   // ~1600×960 recrop masters    (/orig/<id>.jpg)
+static const char *kThumbDir  = "/thumb";  // ~200px list thumbnails       (/thumb/<id>.jpg)
 
 SPIClass sdSpi(HSPI);
 
 static uint8_t *gFrameBuffer  = nullptr;
-static BLECharacteristic *gStatusChar = nullptr;
+static BLECharacteristic *gStatusChar   = nullptr;
+static BLECharacteristic *gQueueChar    = nullptr;
+static BLECharacteristic *gAssetOutChar = nullptr;
 static Preferences gPrefs;
 static std::string gFrameName;   // canonical frame name, persisted in NVS
 static volatile bool gBleConnected   = false;
-static volatile bool gBleReceiving   = false;
 static volatile bool gRendering      = false;
-static volatile bool gCommitPending  = false;
 
-// PSRAM receive buffer — avoids any SD I/O inside BLE callbacks
-static uint8_t *gBleBuffer    = nullptr;
-static size_t   gBleBufferLen = 0;
-static const size_t kBleBufferMax = 1300000; // 1.3 MB (BMP ≈ 1.15 MB)
+// ── Asset streaming state ────────────────────────────────────────────────────
+// A single PSRAM buffer holds the in-flight asset. On COMMIT, ownership is handed to
+// loop() (the buffer pointer is moved into the command) and gBleBuffer is nulled, so the
+// NEXT BeginAsset allocates a fresh buffer. This lets the master JPEG stream while loop()
+// is busy rendering the display BMP — BLE writes land on the BLE task into a buffer the
+// renderer no longer owns. No SD I/O ever happens inside a BLE callback.
+enum StreamKind : uint8_t { STREAM_NONE = 0, STREAM_LEGACY = 1, STREAM_BMP = 2, STREAM_JPEG = 3, STREAM_THUMB = 4 };
+static uint8_t   *gBleBuffer    = nullptr;
+static size_t     gBleBufferLen = 0;
+static StreamKind gStreamKind   = STREAM_NONE;
+static uint32_t   gStreamId     = 0;
+static const size_t kBleBufferMax = 1300000; // 1.3 MB (display BMP ≈ 1.15 MB; master JPEG ≈ 0.3 MB)
+
+// ── Command queue (BLE task → loop) ──────────────────────────────────────────
+struct FrameCmd {
+  uint8_t   op;
+  uint8_t   kind;            // StreamKind, for COMMIT
+  uint32_t  id;              // asset / item id
+  uint8_t   idx;            // index param (remove/show/rename)
+  uint8_t   showNow;         // add
+  uint16_t  interval;        // minutes (interval op)
+  uint32_t  offset;          // GetChunk: byte offset into the requested asset
+  uint16_t  length;          // GetChunk: bytes to read
+  uint8_t  *buf;             // owned PSRAM buffer (COMMIT) — loop() frees it
+  size_t    bufLen;
+  uint8_t   orderN;          // reorder length
+  uint8_t   order[kMaxQueueItems];
+  char      label[80];       // add / rename label
+  char      asset[80];       // add: phone PHAsset.localIdentifier
+};
+static QueueHandle_t gCmdQueue = nullptr;
+
+// ── In-memory queue (frame-canonical, persisted to /queue.json) ──────────────
+static JsonDocument gQueue;
+static uint32_t gNextRotateMs = 0;
+static bool     gRotateArmed  = false;
+
+// Pending asset read-back (GetAsset → GetChunk). The frame keeps the path/size between the
+// length request and the chunk reads so it never holds the whole file in RAM at once.
+static char   gReqPath[48] = {0};
+static size_t gReqLen      = 0;
 
 static void epd_reinit();
 bool renderBmpFromSd(const char *path);
 static void applyAdvertising();
+static void resetRotate();
+static void armRotateIfNeeded();
+static long rotateSecondsRemaining();
+static bool renderItem(int idx);
+
+static uint32_t rdU32LE(const uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+static uint16_t rdU16LE(const uint8_t *p) { return (uint16_t)p[0] | ((uint16_t)p[1] << 8); }
+
+static void bmpPathForId(uint32_t id, char *out, size_t n)   { snprintf(out, n, "%s/%08lX.bmp", kImgDir,   (unsigned long)id); }
+static void origPathForId(uint32_t id, char *out, size_t n)  { snprintf(out, n, "%s/%08lX.jpg", kOrigDir,  (unsigned long)id); }
+static void thumbPathForId(uint32_t id, char *out, size_t n) { snprintf(out, n, "%s/%08lX.jpg", kThumbDir, (unsigned long)id); }
 
 // ── BLE helpers ──────────────────────────────────────────────────────────────
 
@@ -46,6 +107,21 @@ static void notifyStatus(uint8_t s) {
   Serial.printf("BLE status: 0x%02X\n", s);
 }
 
+// Serialize the in-memory queue into the queue characteristic (long READ) and ping the app
+// via a dirty-notify on the status char. The app re-reads the queue char on 0x10.
+static void publishQueue() {
+  if (!gQueueChar) return;
+  // next_in = seconds until the next auto-rotate (or absent if off) — for the app countdown.
+  // Added only to the published value, stripped before saveQueue() so it never persists.
+  long rem = rotateSecondsRemaining();
+  if (rem >= 0) gQueue["next_in"] = rem; else gQueue.remove("next_in");
+  std::string out;
+  serializeJson(gQueue, out);
+  gQueueChar->setValue(out);
+  Serial.printf("Queue published (%zu bytes): %s\n", out.size(), out.c_str());
+  notifyStatus(kBleStatusQueueDirty);
+}
+
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *) override {
     gBleConnected = true;
@@ -55,27 +131,24 @@ class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *pServer) override {
     gBleConnected = false;
     Serial.println("BLE: disconnected — restarting advertising");
-    if (gBleReceiving) {
-      // Mid-transfer disconnect: discard PSRAM buffer
-      if (gBleBuffer) { heap_caps_free(gBleBuffer); gBleBuffer = nullptr; }
-      gBleBufferLen = 0;
-      gBleReceiving = false;
-    }
-    gCommitPending = false;
+    // Mid-transfer disconnect: discard the in-flight buffer. A committed-but-unprocessed
+    // buffer is already owned by loop() (gBleBuffer == nullptr) and is unaffected.
+    if (gBleBuffer) { heap_caps_free(gBleBuffer); gBleBuffer = nullptr; }
+    gBleBufferLen = 0;
+    gStreamKind   = STREAM_NONE;
     pServer->startAdvertising();
   }
 };
 
 class ImageDataCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pChar) override {
-    if (gRendering || gCommitPending) return;
     uint8_t *data = pChar->getData();
     size_t   len  = pChar->getLength();
     if (!len) return;
 
-    if (!gBleReceiving) {
-      // First chunk: allocate PSRAM receive buffer
-      if (gBleBuffer) { heap_caps_free(gBleBuffer); gBleBuffer = nullptr; }
+    if (!gBleBuffer) {
+      // Allocate the receive buffer. Normally BeginAsset already did this and set the kind;
+      // a bare first chunk (no BeginAsset) is the legacy single-image flow.
       gBleBuffer = (uint8_t *)heap_caps_malloc(kBleBufferMax, MALLOC_CAP_SPIRAM);
       if (!gBleBuffer) {
         Serial.println("BLE: PSRAM alloc failed");
@@ -83,9 +156,9 @@ class ImageDataCallbacks : public BLECharacteristicCallbacks {
         return;
       }
       gBleBufferLen = 0;
-      gBleReceiving = true;
+      if (gStreamKind == STREAM_NONE) gStreamKind = STREAM_LEGACY;
       notifyStatus(kBleStatusReceiving);
-      Serial.println("BLE: receiving into PSRAM...");
+      Serial.printf("BLE: receiving (kind=%u) into PSRAM...\n", gStreamKind);
     }
 
     if (gBleBufferLen + len > kBleBufferMax) {
@@ -98,28 +171,111 @@ class ImageDataCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+// Control characteristic: opcode + payload. Stream-framing opcodes mutate buffer state
+// directly (PSRAM only, no SD I/O); queue ops are copied into a FreeRTOS command and
+// drained in loop() so all SD/render work stays off the BLE task.
 class ControlCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pChar) override {
-    if (!pChar->getLength()) return;
-    uint8_t cmd = pChar->getData()[0];
+    size_t n = pChar->getLength();
+    if (!n) return;
+    const uint8_t *d = pChar->getData();
+    uint8_t op = d[0];
 
-    if (cmd == kBleCommit) {
-      if (!gBleReceiving || !gBleBuffer) {
-        Serial.println("BLE: COMMIT with no pending data");
-        notifyStatus(kBleStatusError);
-        return;
-      }
-      gBleReceiving = false;
-      Serial.printf("BLE: COMMIT — %zu bytes in PSRAM — handing to main loop\n", gBleBufferLen);
-      // Hand off to loop() — no SD I/O in BLE callback
-      gCommitPending = true;
-
-    } else if (cmd == kBleAbort) {
+    if (op == kBleAbort) {
       if (gBleBuffer) { heap_caps_free(gBleBuffer); gBleBuffer = nullptr; }
       gBleBufferLen = 0;
-      gBleReceiving = false;
+      gStreamKind   = STREAM_NONE;
       Serial.println("BLE: ABORT — buffer discarded");
       notifyStatus(kBleStatusReady);
+      return;
+    }
+
+    if (op == kBleBeginAsset) {
+      if (n < 6) { notifyStatus(kBleStatusError); return; }
+      uint8_t kind = d[1];
+      // Fresh buffer for the new asset; any prior in-flight buffer is discarded (the
+      // committed one is already owned by loop()).
+      if (gBleBuffer) { heap_caps_free(gBleBuffer); gBleBuffer = nullptr; }
+      gBleBuffer = (uint8_t *)heap_caps_malloc(kBleBufferMax, MALLOC_CAP_SPIRAM);
+      if (!gBleBuffer) { Serial.println("BLE: PSRAM alloc failed"); notifyStatus(kBleStatusError); return; }
+      gBleBufferLen = 0;
+      gStreamKind   = (kind == kAssetJpeg) ? STREAM_JPEG
+                    : (kind == kAssetThumb) ? STREAM_THUMB : STREAM_BMP;
+      gStreamId     = rdU32LE(d + 2);
+      Serial.printf("BLE: BEGIN_ASSET kind=%u id=%08lX\n", gStreamKind, (unsigned long)gStreamId);
+      notifyStatus(kBleStatusReceiving);
+      return;
+    }
+
+    FrameCmd c;
+    memset(&c, 0, sizeof(c));
+    c.op = op;
+
+    if (op == kBleCommit) {
+      if (!gBleBuffer) { Serial.println("BLE: COMMIT with no pending data"); notifyStatus(kBleStatusError); return; }
+      // Hand buffer ownership to loop(); next BeginAsset allocates afresh.
+      c.kind   = gStreamKind;
+      c.id     = gStreamId;
+      c.buf    = gBleBuffer;
+      c.bufLen = gBleBufferLen;
+      gBleBuffer    = nullptr;
+      gBleBufferLen = 0;
+      gStreamKind   = STREAM_NONE;
+      Serial.printf("BLE: COMMIT kind=%u id=%08lX (%zu bytes) → loop\n", c.kind, (unsigned long)c.id, c.bufLen);
+    } else if (op == kBleAdd) {
+      if (n < 7) { notifyStatus(kBleStatusError); return; }
+      c.showNow = d[1];
+      c.id      = rdU32LE(d + 2);
+      uint8_t ll = d[6];
+      const uint8_t *p = d + 7;
+      size_t rem = n - 7;
+      size_t labLen = (ll < rem) ? ll : rem;
+      if (labLen > sizeof(c.label) - 1) labLen = sizeof(c.label) - 1;
+      memcpy(c.label, p, labLen); c.label[labLen] = 0;
+      size_t assetOff = 7 + ll;
+      if (assetOff < n) {
+        size_t aLen = n - assetOff;
+        if (aLen > sizeof(c.asset) - 1) aLen = sizeof(c.asset) - 1;
+        memcpy(c.asset, d + assetOff, aLen); c.asset[aLen] = 0;
+      }
+    } else if (op == kBleRemove || op == kBleShow) {
+      if (n < 2) { notifyStatus(kBleStatusError); return; }
+      c.idx = d[1];
+    } else if (op == kBleReorder) {
+      if (n < 2) { notifyStatus(kBleStatusError); return; }
+      uint8_t cnt = d[1];
+      if (cnt > kMaxQueueItems || (size_t)(2 + cnt) > n) { notifyStatus(kBleStatusError); return; }
+      c.orderN = cnt;
+      memcpy(c.order, d + 2, cnt);
+    } else if (op == kBleInterval) {
+      if (n < 3) { notifyStatus(kBleStatusError); return; }
+      c.interval = rdU16LE(d + 1);
+    } else if (op == kBleRename) {
+      if (n < 2) { notifyStatus(kBleStatusError); return; }
+      c.idx = d[1];
+      size_t labLen = n - 2;
+      if (labLen > sizeof(c.label) - 1) labLen = sizeof(c.label) - 1;
+      memcpy(c.label, d + 2, labLen); c.label[labLen] = 0;
+    } else if (op == kBleGetAsset) {
+      if (n < 6) { notifyStatus(kBleStatusError); return; }
+      c.kind = d[1];               // asset kind (bmp/jpeg/thumb)
+      c.id   = rdU32LE(d + 2);
+    } else if (op == kBleGetChunk) {
+      if (n < 7) { notifyStatus(kBleStatusError); return; }
+      c.offset = rdU32LE(d + 1);
+      c.length = rdU16LE(d + 5);
+    } else if (op == kBleNext || op == kBleList || op == kBleClear) {
+      // no payload
+    } else {
+      Serial.printf("BLE: unknown control opcode 0x%02X\n", op);
+      notifyStatus(kBleStatusError);
+      return;
+    }
+
+    if (gCmdQueue && xQueueSend(gCmdQueue, &c, 0) != pdTRUE) {
+      Serial.println("BLE: command queue full");
+      if (c.buf) { heap_caps_free(c.buf); }
+      notifyStatus(kBleStatusError);
     }
   }
 };
@@ -180,7 +336,7 @@ static void initBle() {
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
-  BLEService *pService = pServer->createService(BLE_SERVICE_UUID);
+  BLEService *pService = pServer->createService(BLEUUID(BLE_SERVICE_UUID), 30);
 
   // Image data — WRITE_NR for max throughput (no per-packet ACK)
   BLECharacteristic *pImgChar = pService->createCharacteristic(
@@ -189,7 +345,7 @@ static void initBle() {
   );
   pImgChar->setCallbacks(new ImageDataCallbacks());
 
-  // Control — WRITE (with response so sender knows COMMIT was received)
+  // Control — WRITE (with response so sender knows the command was received)
   BLECharacteristic *pCtrlChar = pService->createCharacteristic(
     BLE_CONTROL_CHAR_UUID,
     BLECharacteristic::PROPERTY_WRITE
@@ -212,6 +368,24 @@ static void initBle() {
   );
   pNameChar->setValue(gFrameName);
   pNameChar->setCallbacks(new NameCallbacks());
+
+  // Queue — READ (frame-canonical queue.json; ATT long-read for values > MTU)
+  gQueueChar = pService->createCharacteristic(
+    BLE_QUEUE_CHAR_UUID,
+    BLECharacteristic::PROPERTY_READ
+  );
+  {
+    std::string out;
+    serializeJson(gQueue, out);
+    gQueueChar->setValue(out);
+  }
+
+  // Asset out — READ (frame→app asset bytes; thumbnail for lists, master for recrop). Loaded on
+  // demand by kBleGetAsset; the app long-reads it after the 0x11 AssetReady notify.
+  gAssetOutChar = pService->createCharacteristic(
+    BLE_ASSET_OUT_CHAR_UUID,
+    BLECharacteristic::PROPERTY_READ
+  );
 
   pService->start();
 
@@ -362,6 +536,9 @@ static bool initSdCard() {
     Serial.println("SD init failed"); return false;
   }
   Serial.println("SD init OK");
+  if (!SD.exists(kImgDir))   SD.mkdir(kImgDir);
+  if (!SD.exists(kOrigDir))  SD.mkdir(kOrigDir);
+  if (!SD.exists(kThumbDir)) SD.mkdir(kThumbDir);
   return true;
 }
 
@@ -376,6 +553,421 @@ static void listRootFiles() {
     entry.close();
   }
   root.close();
+}
+
+static bool writeBufToSd(const char *path, const uint8_t *buf, size_t len) {
+  uint32_t t0 = millis();
+  SD.remove(path);
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) { Serial.printf("SD open for write failed: %s\n", path); return false; }
+  size_t written = f.write(buf, len);
+  f.flush();
+  f.close();
+  bool ok = (written == len);
+  Serial.printf("SD write %s: %zu/%zu %s [%u ms]\n", path, written, len, ok ? "OK" : "INCOMPLETE", millis() - t0);
+  return ok;
+}
+
+// ── Queue engine (frame-canonical; mirrors the Pi /api/queue/* semantics) ─────
+
+static JsonArray queueItems() {
+  if (!gQueue["items"].is<JsonArray>()) gQueue["items"].to<JsonArray>();
+  return gQueue["items"].as<JsonArray>();
+}
+static int currentIdx() { return gQueue["current"] | 0; }
+static void setCurrent(int idx) { gQueue["current"] = idx; }
+
+static void loadQueue() {
+  File f = SD.open(kQueueFile, FILE_READ);
+  if (f) {
+    DeserializationError err = deserializeJson(gQueue, f);
+    f.close();
+    if (!err && gQueue["items"].is<JsonArray>()) {
+      Serial.printf("Queue loaded: %u items, current=%d, interval=%d\n",
+                    queueItems().size(), currentIdx(), (int)(gQueue["interval"] | 0));
+      return;
+    }
+    Serial.printf("queue.json parse error (%s) — resetting\n", err.c_str());
+  } else {
+    Serial.println("No queue.json — starting empty");
+  }
+  gQueue.clear();
+  gQueue["items"].to<JsonArray>();
+  gQueue["current"]  = 0;
+  gQueue["interval"] = 0;
+}
+
+static void saveQueue() {
+  gQueue.remove("next_in");   // transient (publish-only); never persist
+  File f = SD.open(kQueueFile, FILE_WRITE);
+  if (!f) { Serial.println("queue.json open for write failed"); return; }
+  serializeJson(gQueue, f);
+  f.flush();
+  f.close();
+}
+
+// Sweep /img and /orig and delete any file whose id isn't referenced by the queue. Cleans up
+// orphans left when the "keep last file on empty queue" rule retains a file the user later
+// replaced. Called after remove and on boot.
+static void pruneOrphanFiles() {
+  JsonArray items = queueItems();
+  const char *dirs[] = { kImgDir, kOrigDir, kThumbDir };
+  for (const char *dir : dirs) {
+    File d = SD.open(dir);
+    if (!d) continue;
+    // Collect names first (deleting while iterating openNextFile is unsafe on some FS impls).
+    String victims[kMaxQueueItems * 2];
+    int nv = 0;
+    while (nv < (int)(sizeof(victims) / sizeof(victims[0]))) {
+      File e = d.openNextFile();
+      if (!e) break;
+      String name = e.name();          // basename, e.g. "6A2D9C3A.bmp"
+      e.close();
+      uint32_t id = (uint32_t)strtoul(name.c_str(), nullptr, 16);
+      bool referenced = false;
+      for (JsonObject it : items) if ((uint32_t)(it["id"] | 0u) == id) { referenced = true; break; }
+      if (!referenced) { victims[nv++] = String(dir) + "/" + name; }
+    }
+    d.close();
+    for (int i = 0; i < nv; ++i) {
+      Serial.printf("Pruning orphan: %s\n", victims[i].c_str());
+      SD.remove(victims[i]);
+    }
+  }
+}
+
+static bool renderItem(int idx) {
+  JsonArray items = queueItems();
+  if (idx < 0 || (size_t)idx >= items.size()) return false;
+  uint32_t id = items[idx]["id"] | 0u;
+  char path[40];
+  bmpPathForId(id, path, sizeof(path));
+  gRendering = true;
+  notifyStatus(kBleStatusRendering);
+  uint32_t tInit = millis();
+  epd_reinit();
+  Serial.printf("EPD init: %u ms\n", millis() - tInit);
+  bool ok = renderBmpFromSd(path);
+  gRendering = false;
+  notifyStatus(ok ? kBleStatusReady : kBleStatusError);
+  return ok;
+}
+
+// Restart the countdown from now. Use only when the shown image actually changes (show/next/
+// auto-rotate/add-show-now) or the interval is set — those are the events that should reset the
+// "time until next" clock.
+static void resetRotate() {
+  uint32_t interval = gQueue["interval"] | 0;   // minutes
+  int n = queueItems().size();
+  if (interval > 0 && n > 1) {
+    gNextRotateMs = millis() + interval * 60000UL;
+    gRotateArmed  = true;
+    Serial.printf("Auto-rotate reset: %u min (n=%d)\n", interval, n);
+  } else {
+    gRotateArmed = false;
+  }
+}
+
+// Keep the existing countdown running; only arm/disarm if the armed-ness should change (e.g. a
+// queue grew 1→2 items). Use for ops that must NOT reset the timer — rename, reorder,
+// add-to-queue, remove. Per product: rearranging/renaming/recrop don't restart the clock.
+static void armRotateIfNeeded() {
+  uint32_t interval = gQueue["interval"] | 0;
+  int n = queueItems().size();
+  if (interval > 0 && n > 1) {
+    if (!gRotateArmed) { gNextRotateMs = millis() + interval * 60000UL; gRotateArmed = true; }
+  } else {
+    gRotateArmed = false;
+  }
+}
+
+// Seconds until the next auto-rotate, or -1 if not armed. Published to the app so it can show a
+// "next in …" countdown (the frame has no RTC; this is relative to millis()).
+static long rotateSecondsRemaining() {
+  if (!gRotateArmed) return -1;
+  int32_t delta = (int32_t)(gNextRotateMs - millis());
+  return delta > 0 ? (long)(delta / 1000) : 0;
+}
+
+// Delete an item's on-SD assets unless another queue item still references the same id.
+static void deleteItemFiles(uint32_t id) {
+  JsonArray items = queueItems();
+  for (JsonObject it : items) {
+    if ((uint32_t)(it["id"] | 0u) == id) return;   // still referenced
+  }
+  char p[40];
+  bmpPathForId(id, p, sizeof(p));  if (SD.exists(p)) SD.remove(p);
+  origPathForId(id, p, sizeof(p)); if (SD.exists(p)) SD.remove(p);
+}
+
+static void handleAdd(const FrameCmd &c) {
+  JsonArray items = queueItems();
+  bool wasEmpty = items.size() == 0;
+  int  newIdx;
+
+  // NOTE: store label/asset as String(), NOT the raw char[]. ArduinoJson stores a char*/char[]
+  // BY REFERENCE (assumes a string literal) — c.label lives on loop()'s reused stack slot, so
+  // every item would alias the same address and all names collapse to the last one written.
+  // String forces a copy into the document. (Root cause of the rename-hits-all / add-resets-all
+  // / blank-label corruption.)
+  if (c.showNow || wasEmpty) {
+    JsonObject slot = items.add<JsonObject>();
+    slot["id"]    = c.id;
+    slot["label"] = String(c.label);
+    if (c.asset[0]) slot["asset"] = String(c.asset);
+    newIdx = items.size() - 1;
+    setCurrent(newIdx);
+  } else {
+    // Insert before the currently-shown item; bump current so it still points at the same
+    // shown item (mirrors the Pi insert-at-current behavior).
+    int cur = currentIdx();
+    if (cur < 0) cur = 0;
+    if (cur > (int)items.size()) cur = items.size();
+    items.add<JsonObject>();                          // grow by one (trailing slot)
+    for (int i = (int)items.size() - 1; i > cur; --i) // shift right to open a hole at cur
+      items[i].set(items[i - 1]);
+    JsonObject slot = items[cur];
+    slot.clear();
+    slot["id"]    = c.id;
+    slot["label"] = String(c.label);
+    if (c.asset[0]) slot["asset"] = String(c.asset);
+    newIdx = cur;
+    setCurrent(cur + 1);
+  }
+
+  saveQueue();
+  pruneOrphanFiles();   // drop any stale file left by the "keep last on empty" rule
+  publishQueue();
+  if (c.showNow || wasEmpty) { renderItem(newIdx); resetRotate(); }
+  else                        { armRotateIfNeeded(); }   // add-to-queue must not reset the clock
+}
+
+static void handleRemove(const FrameCmd &c) {
+  JsonArray items = queueItems();
+  int idx = c.idx;
+  if (idx < 0 || (size_t)idx >= items.size()) { notifyStatus(kBleStatusError); return; }
+
+  int oldCurrent = currentIdx();
+  uint32_t id = items[idx]["id"] | 0u;
+  items.remove(idx);
+
+  // Empty-after-remove: keep the last item's files on disk (still on e-ink). Otherwise
+  // delete the removed item's assets (unless another item shares the id).
+  if (items.size() > 0) deleteItemFiles(id);
+
+  if (idx < oldCurrent) {
+    setCurrent(oldCurrent - 1);                       // shown item shifted left
+  } else if (currentIdx() >= (int)items.size() && currentIdx() > 0) {
+    setCurrent((int)items.size() - 1);                // was at/after end → clamp
+  }
+
+  saveQueue();
+  publishQueue();
+  if (idx == oldCurrent && items.size() > 0) { renderItem(currentIdx()); resetRotate(); }
+  else                                       { armRotateIfNeeded(); }
+}
+
+static void handleReorder(const FrameCmd &c) {
+  JsonArray items = queueItems();
+  int n = items.size();
+  if (c.orderN != n || n > kMaxQueueItems) { notifyStatus(kBleStatusError); return; }
+  // Validate the order is a permutation of 0..n-1.
+  bool seen[kMaxQueueItems] = {false};
+  for (int i = 0; i < n; ++i) {
+    int v = c.order[i];
+    if (v < 0 || v >= n || seen[v]) { notifyStatus(kBleStatusError); return; }
+    seen[v] = true;
+  }
+  // Snapshot to plain values first. Building a new array from JsonVariants that still alias
+  // the live document (and then overwriting that document) corrupts the items — copy out the
+  // primitives, then rebuild the array in place from the snapshot.
+  uint32_t ids[kMaxQueueItems];
+  String   labels[kMaxQueueItems];
+  String   assets[kMaxQueueItems];
+  bool     hasAsset[kMaxQueueItems];
+  for (int i = 0; i < n; ++i) {
+    ids[i]      = items[i]["id"] | 0u;
+    labels[i]   = (const char *)(items[i]["label"] | "");
+    hasAsset[i] = items[i]["asset"].is<const char *>();
+    assets[i]   = hasAsset[i] ? (const char *)(items[i]["asset"] | "") : String();
+  }
+  int cur = currentIdx();
+  int newCur = 0;
+  JsonArray ni = gQueue["items"].to<JsonArray>();   // clears the array
+  for (int i = 0; i < n; ++i) {
+    int src = c.order[i];
+    JsonObject o = ni.add<JsonObject>();
+    o["id"]    = ids[src];
+    o["label"] = labels[src];
+    if (hasAsset[src]) o["asset"] = assets[src];
+    if (src == cur) newCur = i;
+  }
+  setCurrent(newCur);
+
+  saveQueue();
+  publishQueue();
+  armRotateIfNeeded();   // reorder must not reset the clock
+}
+
+static void handleShow(const FrameCmd &c) {
+  JsonArray items = queueItems();
+  if (c.idx < 0 || (size_t)c.idx >= items.size()) { notifyStatus(kBleStatusError); return; }
+  setCurrent(c.idx);
+  saveQueue();
+  publishQueue();
+  renderItem(c.idx);
+  resetRotate();         // shown image changed → restart the clock
+}
+
+static void handleNext() {
+  JsonArray items = queueItems();
+  int n = items.size();
+  if (n < 2) { notifyStatus(kBleStatusError); return; }
+  int next = (currentIdx() + 1) % n;
+  setCurrent(next);
+  saveQueue();
+  publishQueue();
+  renderItem(next);
+  resetRotate();
+}
+
+static void handleInterval(const FrameCmd &c) {
+  gQueue["interval"] = c.interval;
+  saveQueue();
+  publishQueue();
+  resetRotate();         // interval change → restart the clock
+}
+
+static void handleRename(const FrameCmd &c) {
+  JsonArray items = queueItems();
+  if (c.idx < 0 || (size_t)c.idx >= items.size()) { notifyStatus(kBleStatusError); return; }
+  items[c.idx]["label"] = String(c.label);   // String → copy (see handleAdd note)
+  saveQueue();
+  publishQueue();
+  // no rotate change — rename must not reset the clock
+}
+
+static void handleCommit(FrameCmd &c) {
+  bool ok = false;
+  char path[40];
+  if (c.kind == STREAM_LEGACY) {
+    // Back-compat: bare image, no queue entry. Write + render immediately (old behavior).
+    ok = writeBufToSd(kLegacyImage, c.buf, c.bufLen);
+    if (ok) {
+      gRendering = true;
+      notifyStatus(kBleStatusRendering);
+      uint32_t t = millis(); epd_reinit(); Serial.printf("EPD init: %u ms\n", millis() - t);
+      ok = renderBmpFromSd(kLegacyImage);
+      gRendering = false;
+    }
+    notifyStatus(ok ? kBleStatusReady : kBleStatusError);
+  } else if (c.kind == STREAM_BMP) {
+    bmpPathForId(c.id, path, sizeof(path));
+    ok = writeBufToSd(path, c.buf, c.bufLen);   // no render — ADD/SHOW drives display
+    notifyStatus(ok ? kBleStatusReady : kBleStatusError);
+  } else if (c.kind == STREAM_JPEG) {
+    origPathForId(c.id, path, sizeof(path));
+    ok = writeBufToSd(path, c.buf, c.bufLen);   // recrop master; no render
+    notifyStatus(ok ? kBleStatusReady : kBleStatusError);
+  } else if (c.kind == STREAM_THUMB) {
+    thumbPathForId(c.id, path, sizeof(path));
+    ok = writeBufToSd(path, c.buf, c.bufLen);   // list thumbnail; no render
+    notifyStatus(ok ? kBleStatusReady : kBleStatusError);
+  } else {
+    Serial.println("COMMIT with unknown stream kind");
+    notifyStatus(kBleStatusError);
+  }
+  if (c.buf) { heap_caps_free(c.buf); c.buf = nullptr; }
+}
+
+// Read-back is chunked so the frame never holds a whole asset (master ≈ 250 KB) in RAM at once.
+// GetAsset records the path/size and returns the 4-byte length; the app then pulls fixed-size
+// slices with GetChunk. Both run in loop() — SD I/O off the BLE task.
+static void handleGetAsset(const FrameCmd &c) {
+  if (!gAssetOutChar) { notifyStatus(kBleStatusError); return; }
+  char path[40];
+  if (c.kind == kAssetJpeg)       origPathForId(c.id, path, sizeof(path));
+  else if (c.kind == kAssetThumb) thumbPathForId(c.id, path, sizeof(path));
+  else                            bmpPathForId(c.id, path, sizeof(path));
+
+  File f = SD.open(path, FILE_READ);
+  if (!f || f.size() == 0) {
+    if (f) f.close();
+    gReqPath[0] = 0; gReqLen = 0;
+    Serial.printf("GetAsset miss: %s\n", path);
+    notifyStatus(kBleStatusAssetMissing);
+    return;
+  }
+  gReqLen = f.size();
+  f.close();
+  strncpy(gReqPath, path, sizeof(gReqPath) - 1);
+  gReqPath[sizeof(gReqPath) - 1] = 0;
+  uint8_t hdr[4] = { (uint8_t)(gReqLen), (uint8_t)(gReqLen >> 8), (uint8_t)(gReqLen >> 16), (uint8_t)(gReqLen >> 24) };
+  gAssetOutChar->setValue(hdr, 4);
+  Serial.printf("GetAsset ready: %s (%zu bytes)\n", path, gReqLen);
+  notifyStatus(kBleStatusAssetReady);
+}
+
+static void deleteAllInDir(const char *dir) {
+  File d = SD.open(dir);
+  if (!d) return;
+  String victims[kMaxQueueItems * 4];
+  int nv = 0;
+  while (nv < (int)(sizeof(victims) / sizeof(victims[0]))) {
+    File e = d.openNextFile();
+    if (!e) break;
+    String name = e.name(); e.close();
+    victims[nv++] = String(dir) + "/" + name;
+  }
+  d.close();
+  for (int i = 0; i < nv; ++i) SD.remove(victims[i]);
+}
+
+// Wipe the entire gallery: empty the queue and delete every stored asset. The frame is
+// canonical, so this is the app's "reset" (deleting the app does NOT clear the frame).
+static void handleClear() {
+  gQueue["items"].to<JsonArray>();   // clears items
+  setCurrent(0);
+  saveQueue();
+  deleteAllInDir(kImgDir);
+  deleteAllInDir(kOrigDir);
+  deleteAllInDir(kThumbDir);
+  gRotateArmed = false;
+  publishQueue();
+  Serial.println("Queue cleared (all assets deleted)");
+}
+
+static void handleGetChunk(const FrameCmd &c) {
+  if (!gAssetOutChar || gReqPath[0] == 0) { notifyStatus(kBleStatusError); return; }
+  File f = SD.open(gReqPath, FILE_READ);
+  if (!f) { notifyStatus(kBleStatusError); return; }
+  if (!f.seek(c.offset)) { f.close(); notifyStatus(kBleStatusError); return; }
+  uint16_t want = c.length;
+  uint8_t *buf = (uint8_t *)heap_caps_malloc(want, MALLOC_CAP_SPIRAM);
+  if (!buf) { f.close(); notifyStatus(kBleStatusError); return; }
+  size_t rd = f.read(buf, want);
+  f.close();
+  gAssetOutChar->setValue(buf, rd);
+  heap_caps_free(buf);
+  notifyStatus(kBleStatusAssetReady);
+}
+
+static void processCommand(FrameCmd &c) {
+  switch (c.op) {
+    case kBleCommit:   handleCommit(c);   break;
+    case kBleAdd:      handleAdd(c);      break;
+    case kBleRemove:   handleRemove(c);   break;
+    case kBleReorder:  handleReorder(c);  break;
+    case kBleShow:     handleShow(c);     break;
+    case kBleNext:     handleNext();      break;
+    case kBleInterval: handleInterval(c); break;
+    case kBleRename:   handleRename(c);   break;
+    case kBleList:     publishQueue();    break;
+    case kBleGetAsset: handleGetAsset(c); break;
+    case kBleGetChunk: handleGetChunk(c); break;
+    case kBleClear:    handleClear();     break;
+    default: break;
+  }
 }
 
 // ── Display helpers ───────────────────────────────────────────────────────────
@@ -418,7 +1010,9 @@ void setup() {
   Serial.begin(115200);
   delay(300);
   Serial.println();
-  Serial.println("Plink Frame v0.1 — BLE+SD");
+  Serial.println("Plink Frame v0.1 — BLE+SD (queue/gallery)");
+
+  gCmdQueue = xQueueCreate(8, sizeof(FrameCmd));
 
   initDisplay();
 
@@ -426,54 +1020,53 @@ void setup() {
     Serial.println("SD failed — continuing to BLE init");
   } else {
     listRootFiles();
-    if (SD.exists(kImageName)) {
-      Serial.printf("Found %s — rendering on boot\n", kImageName);
-      renderBmpFromSd(kImageName);
+    loadQueue();
+    // Prune orphans only when the queue is non-empty — an empty queue intentionally keeps the
+    // last-shown file on disk (e-ink retention), so don't sweep it away.
+    if (queueItems().size() > 0) pruneOrphanFiles();
+    JsonArray items = queueItems();
+    if (items.size() > 0) {
+      // Resume the last shown item (frame-canonical).
+      int cur = currentIdx();
+      if (cur < 0 || (size_t)cur >= items.size()) { cur = 0; setCurrent(0); }
+      uint32_t id = items[cur]["id"] | 0u;
+      char path[40];
+      bmpPathForId(id, path, sizeof(path));
+      Serial.printf("Resuming queue item %d (%s)\n", cur, path);
+      renderBmpFromSd(path);
+    } else if (SD.exists(kLegacyImage)) {
+      Serial.printf("Empty queue — rendering legacy %s\n", kLegacyImage);
+      renderBmpFromSd(kLegacyImage);
     } else {
-      Serial.printf("No image at %s\n", kImageName);
+      Serial.println("Empty queue, no legacy image — nothing to render on boot");
     }
   }
 
   initBle();
+  armRotateIfNeeded();
 }
 
 void loop() {
-  if (gCommitPending) {
-    gCommitPending = false;
-    gRendering = true;
-
-    Serial.printf("loop: writing %zu bytes to SD...\n", gBleBufferLen);
-    uint32_t tSdStart = millis();
-    SD.remove(kImageName);
-    File f = SD.open(kImageName, FILE_WRITE);
-    bool sdOk = false;
-    if (f) {
-      size_t written = f.write(gBleBuffer, gBleBufferLen);
-      f.flush();
-      f.close();
-      sdOk = (written == gBleBufferLen);
-      Serial.printf("SD write: %zu/%zu bytes %s [%u ms]\n",
-                    written, gBleBufferLen, sdOk ? "OK" : "INCOMPLETE", millis() - tSdStart);
-    } else {
-      Serial.println("loop: SD open for write failed");
-    }
-
-    heap_caps_free(gBleBuffer);
-    gBleBuffer = nullptr;
-    gBleBufferLen = 0;
-
-    if (!sdOk) {
-      gRendering = false;
-      notifyStatus(kBleStatusError);
-    } else {
-      notifyStatus(kBleStatusRendering);
-      uint32_t tInitStart = millis();
-      epd_reinit();
-      Serial.printf("EPD init: %u ms\n", millis() - tInitStart);
-      bool ok = renderBmpFromSd(kImageName);
-      gRendering = false;
-      notifyStatus(ok ? kBleStatusReady : kBleStatusError);
-    }
+  // Drain queued BLE commands (SD/render work runs here, off the BLE task).
+  FrameCmd c;
+  if (gCmdQueue && xQueueReceive(gCmdQueue, &c, 0) == pdTRUE) {
+    processCommand(c);
   }
+
+  // Autonomous auto-rotate — no phone needed.
+  if (gRotateArmed && !gRendering && (int32_t)(millis() - gNextRotateMs) >= 0) {
+    JsonArray items = queueItems();
+    int n = items.size();
+    if (n > 1) {
+      int next = (currentIdx() + 1) % n;
+      setCurrent(next);
+      saveQueue();
+      publishQueue();
+      Serial.printf("Auto-rotate → item %d\n", next);
+      renderItem(next);
+    }
+    resetRotate();
+  }
+
   delay(10);
 }

@@ -81,6 +81,17 @@ case "$action" in
     selected="${releases[$((choice-1))]}"
     bins_dir="$selected/bins"
 
+    # Staging (dev) is built from the live src/ — always rebuild before flashing so we never
+    # flash stale bins (the .pio/build → staging/bins sync gap). Releases are frozen; skip.
+    if [[ "$selected" == "$STAGING_DIR"/* ]]; then
+      echo "Rebuilding dev firmware from src/ before flash…"
+      if ! "$SCRIPT_DIR/build-dev.sh"; then
+        echo "Build failed — aborting flash."
+        exit 1
+      fi
+      echo ""
+    fi
+
     for f in bootloader.bin partitions.bin firmware.bin; do
       if [[ ! -f "$bins_dir/$f" ]]; then
         echo "Missing bin: $bins_dir/$f"
