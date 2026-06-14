@@ -38,8 +38,9 @@ echo "Plink Frame v0.1  •  $PORT"
 echo "────────────────────────────────"
 echo "  1) Flash firmware"
 echo "  2) Open serial monitor"
+echo "  3) Clear ghosting (panel refresh cycle)"
 echo ""
-read -rp "Select [1-2]: " action
+read -rp "Select [1-3]: " action
 echo ""
 
 case "$action" in
@@ -127,17 +128,72 @@ case "$action" in
 
     if [[ "$open_monitor" == "y" || "$open_monitor" == "Y" ]]; then
       echo "Opening monitor on $PORT @ $BAUD"
-      echo "Quit: Ctrl-A then Ctrl-\\"
+      echo "Quit: Ctrl-C"
       read -rp "Press Enter to open: "
-      screen "$PORT" "$BAUD"
+      pio device monitor -p "$PORT" -b "$BAUD"
     fi
     ;;
 
   2)
     echo "Opening monitor on $PORT @ $BAUD"
-    echo "Quit: Ctrl-A then Ctrl-\\"
+    echo "Quit: Ctrl-C"
     read -rp "Press Enter to open: "
-    screen "$PORT" "$BAUD"
+    pio device monitor -p "$PORT" -b "$BAUD"
+    ;;
+
+  3)
+    # Send the "clear" serial command to the running firmware and stream its progress. Opens the
+    # port with DTR/RTS deasserted so the ESP is NOT reset on open — the live firmware receives the
+    # command. Runs ~4 full panel refreshes (~2 min), then re-renders the current image.
+    echo "Clearing ghosting on $PORT — ~2 min (4 panel passes). Frame must be powered + idle."
+    read -rp "Press Enter to start: "
+    # Prefer PlatformIO's bundled python (pyserial guaranteed); fall back to system python3.
+    PYBIN="$(command -v python3 || true)"
+    [[ -x "$HOME/.platformio/penv/bin/python" ]] && PYBIN="$HOME/.platformio/penv/bin/python"
+    if [[ -z "$PYBIN" ]]; then echo "python3 not found."; exit 1; fi
+    "$PYBIN" - "$PORT" "$BAUD" <<'PYEOF'
+import sys, time, serial
+port, baud = sys.argv[1], int(sys.argv[2])
+s = serial.Serial()
+s.port = port; s.baudrate = baud
+s.dtr = False; s.rts = False          # try to avoid an auto-reset on open
+s.timeout = 1
+s.open()
+# Most USB-serial adapters reset the ESP when the port opens, so a command sent immediately is
+# lost during boot. Wait until the firmware finishes setup (it prints "BLE advertising as ...")
+# before sending. If no banner appears within the window (board didn't reset), send anyway.
+print("Waiting for frame to be ready (boots in ~45s if it reset on connect)...")
+boot_deadline = time.time() + 60
+while time.time() < boot_deadline:
+    line = s.readline()
+    if line:
+        sys.stdout.write(line.decode(errors="replace")); sys.stdout.flush()
+        if b"BLE advertising as" in line:
+            break
+time.sleep(0.5); s.reset_input_buffer()
+s.write(b"clear\n")
+print("\nSent 'clear'. Streaming firmware output (Ctrl-C to stop)...\n")
+deadline = time.time() + 220
+seen = False
+try:
+    while time.time() < deadline:
+        line = s.readline()
+        if line:
+            sys.stdout.write(line.decode(errors="replace")); sys.stdout.flush()
+            if b"Clearing ghosting" in line:
+                seen = True
+            if b"Ghost clear complete" in line:
+                deadline = min(deadline, time.time() + 50)   # let the restore-render finish
+    if not seen:
+        print("\n(!) Never saw 'Clearing ghosting' — firmware may not have the clear handler. "
+              "Reflash dev (option 1), then retry.")
+except KeyboardInterrupt:
+    pass
+finally:
+    s.close()
+PYEOF
+    echo ""
+    echo "Done."
     ;;
 
   *)

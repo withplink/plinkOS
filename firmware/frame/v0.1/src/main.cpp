@@ -10,6 +10,7 @@
 #include <Preferences.h>
 #include <esp_gap_ble_api.h>
 #include <ArduinoJson.h>
+#include <vector>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -58,7 +59,7 @@ struct FrameCmd {
   uint32_t  id;              // asset / item id
   uint8_t   idx;            // index param (remove/show/rename)
   uint8_t   showNow;         // add
-  uint16_t  interval;        // minutes (interval op)
+  uint32_t  interval;        // seconds (interval op)
   uint32_t  offset;          // GetChunk: byte offset into the requested asset
   uint16_t  length;          // GetChunk: bytes to read
   uint8_t  *buf;             // owned PSRAM buffer (COMMIT) — loop() frees it
@@ -87,6 +88,8 @@ static void resetRotate();
 static void armRotateIfNeeded();
 static long rotateSecondsRemaining();
 static bool renderItem(int idx);
+static JsonArray queueItems();
+static int currentIdx();
 
 static uint32_t rdU32LE(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -248,8 +251,8 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
       c.orderN = cnt;
       memcpy(c.order, d + 2, cnt);
     } else if (op == kBleInterval) {
-      if (n < 3) { notifyStatus(kBleStatusError); return; }
-      c.interval = rdU16LE(d + 1);
+      if (n < 5) { notifyStatus(kBleStatusError); return; }
+      c.interval = rdU32LE(d + 1);   // seconds (UInt32 LE — 24 h won't fit in UInt16)
     } else if (op == kBleRename) {
       if (n < 2) { notifyStatus(kBleStatusError); return; }
       c.idx = d[1];
@@ -273,9 +276,21 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
     }
 
     if (gCmdQueue && xQueueSend(gCmdQueue, &c, 0) != pdTRUE) {
-      Serial.println("BLE: command queue full");
-      if (c.buf) { heap_caps_free(c.buf); }
-      notifyStatus(kBleStatusError);
+      // Queue full (frame is mid-render, ~31 s, not draining). Drop the OLDEST queued command to
+      // make room for the newest — for rapid interval/show spamming the latest intent is what
+      // should win. Free any heap buffer the dropped command owned (e.g. a COMMIT) so it can't leak.
+      // `old` is static, NOT a stack local: FrameCmd is ~260 B and a second one in this BLE-task
+      // callback frame overflows the small BTC_TASK stack (canary trip on BEGIN_ASSET). The BLE
+      // write callback is single-threaded, so a shared static is safe here.
+      static FrameCmd old;
+      if (xQueueReceive(gCmdQueue, &old, 0) == pdTRUE && old.buf) heap_caps_free(old.buf);
+      if (xQueueSend(gCmdQueue, &c, 0) != pdTRUE) {   // still full → give up on this one
+        if (c.buf) heap_caps_free(c.buf);
+        notifyStatus(kBleStatusError);
+        Serial.println("BLE: cmd queue full — dropped newest");
+      } else {
+        Serial.println("BLE: cmd queue full — dropped oldest to keep newest");
+      }
     }
   }
 };
@@ -528,6 +543,38 @@ bool renderBmpFromSd(const char *path) {
   return true;
 }
 
+// Flush the panel through solid black/white passes to clear e-ink ghosting / color retention,
+// then restore the shown image. Each PIC_display is a full ~31 s Spectra 6 refresh. Runs in
+// loop() (ample stack) — triggered over USB serial by typing "clear" (frame.sh option 3). This
+// is a dev/maintenance utility, not part of the BLE protocol.
+static void clearGhost() {
+  size_t fbBytes = (size_t)EPD_WIDTH * EPD_HEIGHT;
+  uint8_t *fb = (uint8_t *)heap_caps_malloc(fbBytes, MALLOC_CAP_SPIRAM);
+  if (!fb) { Serial.println("clearGhost: PSRAM alloc failed"); return; }
+  const uint8_t passes[] = { 0x00, 0xFF, 0x00, 0xFF };   // black/white inversions; end white
+  const unsigned n = sizeof(passes);
+  Serial.printf("Clearing ghosting — %u passes (~%us)...\n", n, n * 31);
+  for (unsigned i = 0; i < n; ++i) {
+    memset(fb, passes[i], fbBytes);
+    epd_reinit();
+    PIC_display(fb);
+    EPD_sleep();
+    Serial.printf("  pass %u/%u (0x%02X) done\n", i + 1, n, passes[i]);
+  }
+  heap_caps_free(fb);
+  Serial.println("Ghost clear complete — restoring current image.");
+  // Don't leave the panel blank-white: re-render whatever the queue is showing.
+  JsonArray items = queueItems();
+  if (items.size() > 0) {
+    int cur = currentIdx();
+    if (cur < 0 || (size_t)cur >= items.size()) cur = 0;
+    renderItem(cur);
+  } else if (SD.exists(kLegacyImage)) {
+    epd_reinit();
+    renderBmpFromSd(kLegacyImage);
+  }
+}
+
 // ── SD helpers ────────────────────────────────────────────────────────────────
 
 static bool initSdCard() {
@@ -657,12 +704,12 @@ static bool renderItem(int idx) {
 // auto-rotate/add-show-now) or the interval is set — those are the events that should reset the
 // "time until next" clock.
 static void resetRotate() {
-  uint32_t interval = gQueue["interval"] | 0;   // minutes
+  uint32_t interval = gQueue["interval"] | 0;   // seconds
   int n = queueItems().size();
   if (interval > 0 && n > 1) {
-    gNextRotateMs = millis() + interval * 60000UL;
+    gNextRotateMs = millis() + interval * 1000UL;
     gRotateArmed  = true;
-    Serial.printf("Auto-rotate reset: %u min (n=%d)\n", interval, n);
+    Serial.printf("Auto-rotate reset: %u s (n=%d)\n", interval, n);
   } else {
     gRotateArmed = false;
   }
@@ -672,10 +719,10 @@ static void resetRotate() {
 // queue grew 1→2 items). Use for ops that must NOT reset the timer — rename, reorder,
 // add-to-queue, remove. Per product: rearranging/renaming/recrop don't restart the clock.
 static void armRotateIfNeeded() {
-  uint32_t interval = gQueue["interval"] | 0;
+  uint32_t interval = gQueue["interval"] | 0;   // seconds
   int n = queueItems().size();
   if (interval > 0 && n > 1) {
-    if (!gRotateArmed) { gNextRotateMs = millis() + interval * 60000UL; gRotateArmed = true; }
+    if (!gRotateArmed) { gNextRotateMs = millis() + interval * 1000UL; gRotateArmed = true; }
   } else {
     gRotateArmed = false;
   }
@@ -737,9 +784,11 @@ static void handleAdd(const FrameCmd &c) {
 
   saveQueue();
   pruneOrphanFiles();   // drop any stale file left by the "keep last on empty" rule
+  // Arm/reset the clock BEFORE publish so the published next_in is fresh.
+  // add-to-queue (non-show) must not reset the clock — only arm if needed.
+  if (c.showNow || wasEmpty) resetRotate(); else armRotateIfNeeded();
   publishQueue();
-  if (c.showNow || wasEmpty) { renderItem(newIdx); resetRotate(); }
-  else                        { armRotateIfNeeded(); }   // add-to-queue must not reset the clock
+  if (c.showNow || wasEmpty) renderItem(newIdx);
 }
 
 static void handleRemove(const FrameCmd &c) {
@@ -762,9 +811,10 @@ static void handleRemove(const FrameCmd &c) {
   }
 
   saveQueue();
+  bool rerender = (idx == oldCurrent && items.size() > 0);
+  if (rerender) resetRotate(); else armRotateIfNeeded();   // BEFORE publish for fresh next_in
   publishQueue();
-  if (idx == oldCurrent && items.size() > 0) { renderItem(currentIdx()); resetRotate(); }
-  else                                       { armRotateIfNeeded(); }
+  if (rerender) renderItem(currentIdx());
 }
 
 static void handleReorder(const FrameCmd &c) {
@@ -805,8 +855,8 @@ static void handleReorder(const FrameCmd &c) {
   setCurrent(newCur);
 
   saveQueue();
+  armRotateIfNeeded();   // reorder must not reset the clock (BEFORE publish for fresh next_in)
   publishQueue();
-  armRotateIfNeeded();   // reorder must not reset the clock
 }
 
 static void handleShow(const FrameCmd &c) {
@@ -814,9 +864,9 @@ static void handleShow(const FrameCmd &c) {
   if (c.idx < 0 || (size_t)c.idx >= items.size()) { notifyStatus(kBleStatusError); return; }
   setCurrent(c.idx);
   saveQueue();
+  resetRotate();         // shown image changed → restart the clock (BEFORE publish for fresh next_in)
   publishQueue();
   renderItem(c.idx);
-  resetRotate();         // shown image changed → restart the clock
 }
 
 static void handleNext() {
@@ -826,16 +876,16 @@ static void handleNext() {
   int next = (currentIdx() + 1) % n;
   setCurrent(next);
   saveQueue();
+  resetRotate();         // BEFORE publish so next_in reflects the new clock
   publishQueue();
   renderItem(next);
-  resetRotate();
 }
 
 static void handleInterval(const FrameCmd &c) {
   gQueue["interval"] = c.interval;
   saveQueue();
+  resetRotate();         // interval change → restart the clock (BEFORE publish so next_in is fresh)
   publishQueue();
-  resetRotate();         // interval change → restart the clock
 }
 
 static void handleRename(const FrameCmd &c) {
@@ -911,16 +961,18 @@ static void handleGetAsset(const FrameCmd &c) {
 static void deleteAllInDir(const char *dir) {
   File d = SD.open(dir);
   if (!d) return;
-  String victims[kMaxQueueItems * 4];
-  int nv = 0;
-  while (nv < (int)(sizeof(victims) / sizeof(victims[0]))) {
+  // Snapshot names to a heap vector (NOT a stack array — a fixed String[256] here overflowed the
+  // loop-task stack and double-faulted on Clear). Then delete; can't remove while iterating the
+  // open dir handle.
+  std::vector<String> victims;
+  for (;;) {
     File e = d.openNextFile();
     if (!e) break;
-    String name = e.name(); e.close();
-    victims[nv++] = String(dir) + "/" + name;
+    victims.push_back(String(dir) + "/" + e.name());
+    e.close();
   }
   d.close();
-  for (int i = 0; i < nv; ++i) SD.remove(victims[i]);
+  for (auto &v : victims) SD.remove(v);
 }
 
 // Wipe the entire gallery: empty the queue and delete every stored asset. The frame is
@@ -928,21 +980,29 @@ static void deleteAllInDir(const char *dir) {
 static void handleClear() {
   gQueue["items"].to<JsonArray>();   // clears items
   setCurrent(0);
+  gQueue["interval"] = 0;            // reset auto-rotate on clear (don't keep a stale interval)
+  gRotateArmed = false;
   saveQueue();
   deleteAllInDir(kImgDir);
   deleteAllInDir(kOrigDir);
   deleteAllInDir(kThumbDir);
-  gRotateArmed = false;
   publishQueue();
   Serial.println("Queue cleared (all assets deleted)");
 }
 
+// Serve one read-back slice. Runs in loop() (NOT the BLE write callback) — SD/FatFS needs more
+// stack than the BTC_TASK has, and a 512 B buffer there overflows its canary. The app fires one
+// GetChunk at a time and waits for the 0x11 ready-notify before reading; an app-side pending
+// flag guards the case where the notify lands before the app registers its waiter.
 static void handleGetChunk(const FrameCmd &c) {
   if (!gAssetOutChar || gReqPath[0] == 0) { notifyStatus(kBleStatusError); return; }
   File f = SD.open(gReqPath, FILE_READ);
   if (!f) { notifyStatus(kBleStatusError); return; }
   if (!f.seek(c.offset)) { f.close(); notifyStatus(kBleStatusError); return; }
+  // Bluedroid caps a characteristic value at 600 bytes (ESP_GATT_MAX_ATTR_LEN). Clamp the slice
+  // so a stale/oversized app request can't wedge the read-back. App and firmware agree on 512.
   uint16_t want = c.length;
+  if (want > 512) want = 512;
   uint8_t *buf = (uint8_t *)heap_caps_malloc(want, MALLOC_CAP_SPIRAM);
   if (!buf) { f.close(); notifyStatus(kBleStatusError); return; }
   size_t rd = f.read(buf, want);
@@ -1012,7 +1072,7 @@ void setup() {
   Serial.println();
   Serial.println("Plink Frame v0.1 — BLE+SD (queue/gallery)");
 
-  gCmdQueue = xQueueCreate(8, sizeof(FrameCmd));
+  gCmdQueue = xQueueCreate(16, sizeof(FrameCmd));   // headroom for ops queued during a ~31s render
 
   initDisplay();
 
@@ -1061,11 +1121,21 @@ void loop() {
       int next = (currentIdx() + 1) % n;
       setCurrent(next);
       saveQueue();
+      resetRotate();        // re-arm from now BEFORE publish so next_in is fresh, not 0
       publishQueue();
       Serial.printf("Auto-rotate → item %d\n", next);
       renderItem(next);
+    } else {
+      resetRotate();        // ≤1 item → disarm
     }
-    resetRotate();
+  }
+
+  // Dev maintenance over USB serial: a "clear" line runs a ghosting-clear cycle (frame.sh opt 3).
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.equalsIgnoreCase("clear")) clearGhost();
+    else if (cmd.length()) Serial.printf("Unknown serial cmd: '%s'\n", cmd.c_str());
   }
 
   delay(10);

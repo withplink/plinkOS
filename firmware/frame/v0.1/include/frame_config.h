@@ -58,7 +58,7 @@ constexpr uint8_t kBleRemove      = 0x21;  // [idx:1]
 constexpr uint8_t kBleReorder     = 0x22;  // [n:1][order bytes…]
 constexpr uint8_t kBleShow        = 0x23;  // [idx:1]
 constexpr uint8_t kBleNext        = 0x24;  // (no payload)
-constexpr uint8_t kBleInterval    = 0x25;  // [minutes:2 LE]  (0 = auto-rotate off)
+constexpr uint8_t kBleInterval    = 0x25;  // [seconds:4 LE]  (0 = auto-rotate off)
 constexpr uint8_t kBleRename      = 0x26;  // [idx:1][label…]
 constexpr uint8_t kBleList        = 0x27;  // refresh queue char + dirty-notify
 constexpr uint8_t kBleGetAsset    = 0x28;  // [kind:1][id:4 LE] → asset-out char = 4-byte LE length
