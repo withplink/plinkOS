@@ -21,36 +21,50 @@ See `docs/products/frame/v0.1/parity-gap-audit.md` and architecture build-strate
 - Validate on hardware **before** committing (build-verify alone is not enough).
 - Promote when stable: `git mv staging/<name> releases/NN-<name>`, retitle README, commit.
 
-## Current stable build: `releases/03-ble-name` (STABLE — promoted 2026-06-13)
+## Current stable build: `releases/06-device-actions` (STABLE — promoted 2026-06-15)
 
-Promoted from `staging/dev` after stable-03 (all bugs #1–#8 fixed + HW-validated). On top of
-`releases/02-ble-sd`. Contains:
-1. **Frame name on ESP** — NVS-persisted, READ+WRITE `BLE_NAME_CHAR_UUID` (`…0c2e`), name in
-   scan-response; live re-advertise on rename (Bug #2). App writes name over BLE.
-2. **App-side orientation** — firmware rotation removed; renders panel-native 800×480 directly
-   (Bug #1). `staging/` is now empty; new dev work recreates `staging/dev` via `build-dev.sh`.
+**Frame v0.1 is parity-complete** — full Plink-app feature parity over BLE, HW-validated. Release
+lineage (each has its own README): 01-sd-display → 02-ble-sd → 03-ble-name → 04-queue-gallery →
+05-crop-cache → 06-device-actions. Per-release detail lives in `releases/0N-*/README.md`; the
+authoritative model/protocol/learnings live in `docs/products/frame/v0.1/`.
+
+- **04-queue-gallery** — frame-canonical queue.json + all ops (add/remove/reorder/rename/show/next/
+  interval/clear); render on a dedicated FreeRTOS task (commands serve during a render; `lcd_chkstatus`
+  yields); chunked `GetQueue` (0x2B) past the ~600 B GATT cap; fast-boot BLE.
+- **05-crop-cache** — per-item crop persisted in queue.json (`kAssetCrop`), recrop re-seeds Mantis,
+  local `MasterStore`, crop-accurate thumbnails, boot-render skip (NVS `last_render`).
+- **06-device-actions** — clear-ghost (0x2C, app blocking overlay) + reboot (0x2D) over BLE.
 
 ## State — everything committed + pushed
 
-- All this-session work committed + pushed (plink-ios + plinkOS), root submodule pointers bumped.
-- Stable-03 firmware lives in `releases/03-ble-name` (this commit promotes it).
+All work committed + pushed (plink-ios + plinkOS), root submodule pointers bumped, source-of-truth
+docs current, GitHub issues closed with implementation comments (plinkOS #27/#28/#29/#31, plink-ios
+#24/#26/#27/#34). Clean tree (only untracked `staging/dev`, the regenerated dev build). Both apps
+build clean.
 
-Both apps build clean (`xcodebuild FrameTool` + `pio run` both SUCCEED). Validate-first → not committed.
+## What's built (feature → status) — all HW-validated
 
-## What's built (feature → status)
+| Feature | Status |
+|---|---|
+| Discovery / pair / persistence / name | ✅ |
+| Orientation (app-side rotation, 3 mounts) | ✅ |
+| Queue/gallery: add/remove/reorder/rename/show/next/interval/clear + auto-rotate | ✅ |
+| Render on FreeRTOS task (commands serve during render) | ✅ |
+| Chunked GetQueue (scales past ~600 B cap) | ✅ |
+| Master-image cache + per-item crop persistence (recrop re-seeds Mantis) | ✅ |
+| Crop-accurate thumbnails | ✅ |
+| Boot-render skip (NVS last_render) | ✅ |
+| Device actions: clear-ghost (blocking overlay) + reboot | ✅ |
+| UI polish: countdown self-tick, progress bars, toast handling, reorder pinning | ✅ |
+| Live Activity (timer-estimate render bar) | ✅ |
 
-| Feature | Built | Validated on HW |
-|---|---|---|
-| Discovery / pair / persistence (single frame) | ✅ | ✅ pairs, shows name |
-| Signal flap fix (no allowDuplicates) | ✅ | ~ (no complaint; reverify) |
-| Core send + render (regression) | ✅ | ✅ works |
-| Orientation (app-side rotation, 3 mounts) | ✅ | ✅ all 3 mounts upright (Bug #1 fixed) |
-| Name on ESP (NVS + write char) | ✅ | ✅ NVS + live re-advertise (Bug #2 fixed) |
-| Settings sheet (orientation, rename, unpair) | ✅ | ✅ mostly; rename hangs if frame off (Bug #5) |
-| Live Activity (timer-estimate render bar) | ✅ | ✅ works, better than in-app bar |
-| beginBackgroundTask send guard | ✅ | ✅ (earlier session) |
+## Remaining (none gating v0.1)
 
-## BUGS FOUND THIS SESSION (block stable-03)
+- **plink-ios#25** — capability gating (ESP32 vs Pi). The one open P0.
+- **plink-ios#22** — migrate FrameTool → main Plink app (final phase).
+- Parked: battery (plinkOS#34/ios#31), dithering (plinkOS#26/ios#33), USB-JTAG flash (plinkOS#35).
+
+## Archive — stable-03 bug fixes (historical; all fixed + validated)
 
 **#1 — Orientation model. ✅ FIXED (HW-validated).** Resolved via the **app-side rotation** model:
 orientation = per-frame physical MOUNT (`landscape` / `portraitLeft` / `portraitRight`). App
