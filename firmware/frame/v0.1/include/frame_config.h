@@ -64,6 +64,9 @@ constexpr uint8_t kBleList        = 0x27;  // refresh queue char + dirty-notify
 constexpr uint8_t kBleGetAsset    = 0x28;  // [kind:1][id:4 LE] → asset-out char = 4-byte LE length
 constexpr uint8_t kBleGetChunk    = 0x29;  // [offset:4 LE][len:2 LE] → asset-out char = that slice
 constexpr uint8_t kBleClear       = 0x2A;  // wipe the whole queue + all assets on SD
+constexpr uint8_t kBleGetQueue    = 0x2B;  // (no payload) → asset-out char = 4-byte LE length, then
+                                           //   GetChunk-served queue JSON. Bypasses the queue char's
+                                           //   ~600 B GATT value cap so the gallery scales past ~6 items.
 
 // Asset kinds (kBleBeginAsset / kBleGetAsset payload)
 constexpr uint8_t kAssetBmp   = 0x00;  // 800×480 panel-native display BMP → /img/<id>.bmp

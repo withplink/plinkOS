@@ -81,6 +81,13 @@ static bool     gRotateArmed  = false;
 static char   gReqPath[48] = {0};
 static size_t gReqLen      = 0;
 
+// Chunked queue read-back (GetQueue → GetChunk). When the published queue JSON exceeds the queue
+// char's ~600 B GATT value cap, the app pulls it through the asset-out chunk path instead. The full
+// JSON is staged in this PSRAM buffer for the duration of the read; gServingQueue routes GetChunk
+// to it instead of an SD file. Mutually exclusive with a GetAsset read (each clears the other).
+static bool   gServingQueue = false;
+static char  *gQueueOutBuf  = nullptr;
+
 static void epd_reinit();
 bool renderBmpFromSd(const char *path);
 static void applyAdvertising();
@@ -112,16 +119,24 @@ static void notifyStatus(uint8_t s) {
 
 // Serialize the in-memory queue into the queue characteristic (long READ) and ping the app
 // via a dirty-notify on the status char. The app re-reads the queue char on 0x10.
-static void publishQueue() {
-  if (!gQueueChar) return;
-  // next_in = seconds until the next auto-rotate (or absent if off) — for the app countdown.
-  // Added only to the published value, stripped before saveQueue() so it never persists.
+// Serialize the queue for the app, adding the transient `next_in` countdown (seconds until the next
+// auto-rotate, or absent if off). Added to the published value only — stripped before saveQueue() so
+// it never persists. Shared by publishQueue() (fast char) and handleGetQueue() (chunked path).
+static void buildPublishJson(std::string &out) {
   long rem = rotateSecondsRemaining();
   if (rem >= 0) gQueue["next_in"] = rem; else gQueue.remove("next_in");
-  std::string out;
   serializeJson(gQueue, out);
-  gQueueChar->setValue(out);
-  Serial.printf("Queue published (%zu bytes): %s\n", out.size(), out.c_str());
+}
+
+static void publishQueue() {
+  if (!gQueueChar) return;
+  std::string out;
+  buildPublishJson(out);
+  // The Bluedroid char value caps at ~600 B. Set it for small queues (legacy/fast path), but the
+  // app always reads the queue via the chunked GetQueue path, so skip the oversized setValue that
+  // would only log an error. Either way the dirty-notify tells the app to re-read.
+  if (out.size() <= 512) gQueueChar->setValue(out);
+  Serial.printf("Queue published (%zu bytes)%s\n", out.size(), out.size() > 512 ? " [chunked]" : "");
   notifyStatus(kBleStatusQueueDirty);
 }
 
@@ -267,7 +282,7 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
       if (n < 7) { notifyStatus(kBleStatusError); return; }
       c.offset = rdU32LE(d + 1);
       c.length = rdU16LE(d + 5);
-    } else if (op == kBleNext || op == kBleList || op == kBleClear) {
+    } else if (op == kBleNext || op == kBleList || op == kBleClear || op == kBleGetQueue) {
       // no payload
     } else {
       Serial.printf("BLE: unknown control opcode 0x%02X\n", op);
@@ -392,7 +407,7 @@ static void initBle() {
   {
     std::string out;
     serializeJson(gQueue, out);
-    gQueueChar->setValue(out);
+    if (out.size() <= 512) gQueueChar->setValue(out);   // large queues served via GetQueue chunks
   }
 
   // Asset out — READ (frame→app asset bytes; thumbnail for lists, master for recrop). Loaded on
@@ -935,6 +950,7 @@ static void handleCommit(FrameCmd &c) {
 // slices with GetChunk. Both run in loop() — SD I/O off the BLE task.
 static void handleGetAsset(const FrameCmd &c) {
   if (!gAssetOutChar) { notifyStatus(kBleStatusError); return; }
+  gServingQueue = false;   // a real asset read supersedes any in-flight queue read
   char path[40];
   if (c.kind == kAssetJpeg)       origPathForId(c.id, path, sizeof(path));
   else if (c.kind == kAssetThumb) thumbPathForId(c.id, path, sizeof(path));
@@ -994,8 +1010,41 @@ static void handleClear() {
 // stack than the BTC_TASK has, and a 512 B buffer there overflows its canary. The app fires one
 // GetChunk at a time and waits for the 0x11 ready-notify before reading; an app-side pending
 // flag guards the case where the notify lands before the app registers its waiter.
+// Stage the published queue JSON into PSRAM and hand the app the 4-byte length, mirroring GetAsset.
+// The app then pulls it with GetChunk (routed to gQueueOutBuf below). Lets the gallery exceed the
+// ~600 B queue-char cap that silently dropped queues past ~6 items.
+static void handleGetQueue() {
+  if (!gAssetOutChar) { notifyStatus(kBleStatusError); return; }
+  std::string out;
+  buildPublishJson(out);
+  if (gQueueOutBuf) { heap_caps_free(gQueueOutBuf); gQueueOutBuf = nullptr; }
+  size_t cap = out.size() ? out.size() : 1;
+  gQueueOutBuf = (char *)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+  if (!gQueueOutBuf) { gServingQueue = false; notifyStatus(kBleStatusError); return; }
+  memcpy(gQueueOutBuf, out.data(), out.size());
+  gReqLen       = out.size();
+  gReqPath[0]   = 0;       // not SD-backed
+  gServingQueue = true;
+  uint8_t hdr[4] = { (uint8_t)(gReqLen), (uint8_t)(gReqLen >> 8), (uint8_t)(gReqLen >> 16), (uint8_t)(gReqLen >> 24) };
+  gAssetOutChar->setValue(hdr, 4);
+  Serial.printf("GetQueue ready (%zu bytes)\n", gReqLen);
+  notifyStatus(kBleStatusAssetReady);
+}
+
 static void handleGetChunk(const FrameCmd &c) {
-  if (!gAssetOutChar || gReqPath[0] == 0) { notifyStatus(kBleStatusError); return; }
+  if (!gAssetOutChar) { notifyStatus(kBleStatusError); return; }
+  // Queue read-back: serve the slice straight from the staged PSRAM buffer (no SD).
+  if (gServingQueue) {
+    if (!gQueueOutBuf || c.offset >= gReqLen) { gAssetOutChar->setValue((uint8_t *)"", 0); notifyStatus(kBleStatusAssetReady); return; }
+    uint16_t want = c.length;
+    if (want > 512) want = 512;
+    size_t avail = gReqLen - c.offset;
+    if (want > avail) want = (uint16_t)avail;
+    gAssetOutChar->setValue((uint8_t *)(gQueueOutBuf + c.offset), want);
+    notifyStatus(kBleStatusAssetReady);
+    return;
+  }
+  if (gReqPath[0] == 0) { notifyStatus(kBleStatusError); return; }
   File f = SD.open(gReqPath, FILE_READ);
   if (!f) { notifyStatus(kBleStatusError); return; }
   if (!f.seek(c.offset)) { f.close(); notifyStatus(kBleStatusError); return; }
@@ -1025,6 +1074,7 @@ static void processCommand(FrameCmd &c) {
     case kBleList:     publishQueue();    break;
     case kBleGetAsset: handleGetAsset(c); break;
     case kBleGetChunk: handleGetChunk(c); break;
+    case kBleGetQueue: handleGetQueue();  break;
     case kBleClear:    handleClear();     break;
     default: break;
   }
@@ -1106,6 +1156,67 @@ void setup() {
   armRotateIfNeeded();
 }
 
+// ── Dev serial debug (USB UART) ──────────────────────────────────────────────
+// List a directory's files + sizes; called per asset dir by the `ls` serial command.
+static void serialLsDir(const char *dir) {
+  File d = SD.open(dir);
+  if (!d) { Serial.printf("%s: (missing)\n", dir); return; }
+  Serial.printf("%s:\n", dir);
+  int n = 0;
+  for (;;) {
+    File e = d.openNextFile();
+    if (!e) break;
+    Serial.printf("  %-20s %8u bytes\n", e.name(), (unsigned)e.size());
+    e.close();
+    n++;
+  }
+  d.close();
+  if (n == 0) Serial.println("  (empty)");
+}
+
+// `ls` — dump the SD layout the queue/gallery uses.
+static void serialLs() {
+  Serial.println("── SD ──");
+  File qf = SD.open(kQueueFile, FILE_READ);
+  if (qf) { Serial.printf("%s %8u bytes\n", kQueueFile, (unsigned)qf.size()); qf.close(); }
+  else    Serial.printf("%s (missing)\n", kQueueFile);
+  serialLsDir(kImgDir);
+  serialLsDir(kOrigDir);
+  serialLsDir(kThumbDir);
+}
+
+// `cat <path>` — stream a file to serial. Defaults to queue.json. Caps binary dumps so a stray
+// `cat /img/x.bmp` can't flood the monitor — text files (queue.json) are small and print whole.
+static void serialCat(const char *path) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) { Serial.printf("cat: %s not found\n", path); return; }
+  size_t sz = f.size();
+  Serial.printf("── %s (%u bytes) ──\n", path, (unsigned)sz);
+  // JSON files: parse + pretty-print for readability (SD stays compact). Falls through to a raw
+  // dump on parse error.
+  String name(path);
+  if (name.endsWith(".json")) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, f);
+    f.close();
+    if (!err) { serializeJsonPretty(doc, Serial); Serial.println(); return; }
+    Serial.printf("(parse error: %s — raw dump)\n", err.c_str());
+    f = SD.open(path, FILE_READ);
+    if (!f) return;
+  }
+  const size_t kCap = 4096;   // guard against binary blobs
+  size_t printed = 0;
+  uint8_t buf[128];
+  while (f.available() && printed < kCap) {
+    size_t rd = f.read(buf, sizeof(buf));
+    Serial.write(buf, rd);
+    printed += rd;
+  }
+  f.close();
+  Serial.println();
+  if (printed < sz) Serial.printf("…(truncated, %u/%u bytes)\n", (unsigned)printed, (unsigned)sz);
+}
+
 void loop() {
   // Drain queued BLE commands (SD/render work runs here, off the BLE task).
   FrameCmd c;
@@ -1130,12 +1241,28 @@ void loop() {
     }
   }
 
-  // Dev maintenance over USB serial: a "clear" line runs a ghosting-clear cycle (frame.sh opt 3).
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    if (cmd.equalsIgnoreCase("clear")) clearGhost();
-    else if (cmd.length()) Serial.printf("Unknown serial cmd: '%s'\n", cmd.c_str());
+  // Dev maintenance over USB serial: clear (ghosting cycle), ls + cat (inspect SD). Accumulate
+  // chars across loop iterations until a newline — readStringUntil()'s 1 s timeout fragmented
+  // lines typed by hand (a slow `cat /img/x.bmp` arrived as several partial commands).
+  static String gSerialLine;
+  while (Serial.available()) {
+    char ch = (char)Serial.read();
+    Serial.write(ch);   // echo — the monitor has no local echo, so without this typing is invisible
+    if (ch == '\n' || ch == '\r') {
+      String cmd = gSerialLine; gSerialLine = "";
+      cmd.trim();
+      if (cmd.equalsIgnoreCase("clear")) clearGhost();
+      else if (cmd.equalsIgnoreCase("ls")) serialLs();
+      else if (cmd.equalsIgnoreCase("cat") || cmd.equalsIgnoreCase("cat queue.json")) serialCat(kQueueFile);
+      else if (cmd.startsWith("cat ")) {
+        String p = cmd.substring(4); p.trim();
+        if (!p.startsWith("/")) p = "/" + p;   // accept "img/x.bmp" or "/img/x.bmp"
+        serialCat(p.c_str());
+      }
+      else if (cmd.length()) Serial.printf("Unknown serial cmd: '%s'\n", cmd.c_str());
+    } else {
+      gSerialLine += ch;
+    }
   }
 
   delay(10);
