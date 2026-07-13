@@ -45,6 +45,23 @@ constexpr int kFrameRotation = 0;
 #define BLE_NAME_CHAR_UUID     "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0c2e"  // READ+WRITE, frame name (NVS-backed)
 #define BLE_QUEUE_CHAR_UUID    "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0d3f"  // READ, frame-canonical queue.json
 #define BLE_ASSET_OUT_CHAR_UUID "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0e40" // READ, asset bytes streamed frame→app (long read)
+#define BLE_BATTERY_CHAR_UUID  "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0f51"  // READ+NOTIFY, {percent:1, flags:1} (flags bit0=charging)
+
+// ── Battery (resistor-divider ADC) — plinkOS#34 ──────────────────────────────
+// IP5306 (eSOP8 package) has no I2C, no STAT/PG pin — confirmed via the Injoinic datasheet itself:
+// the part is 8 pins total (VIN/LED1/LED2/LED3/KEY/BAT/SW/VOUT), physically incapable of I2C. Only
+// larger sibling parts (IP5108/5109/5209/5219, different package) support I2C. So this reads the
+// raw analog nodes directly instead: a resistor divider off IP5306 pin 6 (BAT, raw LiPo+) for
+// percent, and a second divider off VIN (5V charger input) as a "USB present" charging proxy.
+// Stopgap for this dev board only — a real production PCB should use a proper fuel-gauge IC
+// (e.g. MAX17048) instead of a hand-calibrated voltage curve.
+constexpr bool kBatterySenseWired = false;  // TODO(#34): flip true once the two dividers are soldered
+constexpr int  kBatteryAdcPin = 1;   // BAT divider — ADC1 channel (avoids ADC2/WiFi-BT contention)
+constexpr int  kVbusAdcPin    = 8;   // VIN divider — ADC1 channel
+// Divider ratios (measured node / true node). R1 = node-side resistor, R2 = GND-side resistor.
+constexpr float kBatteryDividerFactor = 22.0f / (10.0f + 22.0f);  // R1=10k, R2=22k → 4.2V→~2.89V
+constexpr float kVbusDividerFactor    = 12.0f / (10.0f + 12.0f);  // R1=10k, R2=12k → 5.5V→~3.0V
+constexpr float kVbusPresentThresholdV = 1.5f;  // divided VIN reads ~0V unplugged, ~2.7V on USB
 
 // ── BLE control opcodes ──────────────────────────────────────────────────────
 // The control characteristic (WRITE w/ response) carries a 1-byte opcode + payload.

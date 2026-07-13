@@ -36,6 +36,7 @@ static uint8_t *gFrameBuffer  = nullptr;
 static BLECharacteristic *gStatusChar   = nullptr;
 static BLECharacteristic *gQueueChar    = nullptr;
 static BLECharacteristic *gAssetOutChar = nullptr;
+static BLECharacteristic *gBatteryChar  = nullptr;
 static Preferences gPrefs;
 static std::string gFrameName;   // canonical frame name, persisted in NVS
 static volatile bool gBleConnected   = false;
@@ -148,6 +149,49 @@ static void notifyStatus(uint8_t s) {
   }
   if (gBleMutex) xSemaphoreGive(gBleMutex);
   Serial.printf("BLE status: 0x%02X\n", s);
+}
+
+// ── Battery (resistor-divider ADC) — plinkOS#34 ──────────────────────────────
+static void initBatterySense() {
+  if (!kBatterySenseWired) return;  // dividers not soldered yet — leave ADC unconfigured
+  analogSetPinAttenuation(kBatteryAdcPin, ADC_11db);
+  analogSetPinAttenuation(kVbusAdcPin, ADC_11db);
+}
+
+// Coarse single-cell LiPo voltage → % curve, linear-interpolated between known rest-voltage
+// points. Uncalibrated to this specific battery — good enough for a rough indicator, not a
+// lab-grade fuel gauge (a real gauge IC is the right call once this moves to a production PCB).
+static uint8_t voltageToPercent(float v) {
+  struct Point { float volts; uint8_t pct; };
+  static const Point kCurve[] = {
+    {4.20f, 100}, {4.06f, 90}, {3.98f, 80}, {3.92f, 70}, {3.87f, 60},
+    {3.82f, 50},  {3.79f, 40}, {3.77f, 30}, {3.74f, 20}, {3.68f, 10}, {3.45f, 0},
+  };
+  constexpr int n = sizeof(kCurve) / sizeof(kCurve[0]);
+  if (v >= kCurve[0].volts)     return 100;
+  if (v <= kCurve[n - 1].volts) return 0;
+  for (int i = 0; i < n - 1; i++) {
+    if (v <= kCurve[i].volts && v >= kCurve[i + 1].volts) {
+      float span = kCurve[i].volts - kCurve[i + 1].volts;
+      float frac = (v - kCurve[i + 1].volts) / span;
+      return (uint8_t)(kCurve[i + 1].pct + frac * (kCurve[i].pct - kCurve[i + 1].pct));
+    }
+  }
+  return 0;
+}
+
+// Returns false only when the dividers aren't wired yet (kBatterySenseWired) — caller then keeps
+// notifying "unavailable" (0xFF) instead of a floating-pin garbage reading.
+static bool readBatterySense(uint8_t &percent, bool &charging) {
+  if (!kBatterySenseWired) return false;
+
+  float batV = (analogRead(kBatteryAdcPin) / 4095.0f) * 3.3f / kBatteryDividerFactor;
+  percent = voltageToPercent(batV);
+
+  float vbusV = (analogRead(kVbusAdcPin) / 4095.0f) * 3.3f / kVbusDividerFactor;
+  charging = vbusV > kVbusPresentThresholdV;
+
+  return true;
 }
 
 // Serialize the in-memory queue into the queue characteristic (long READ) and ping the app
@@ -451,6 +495,19 @@ static void initBle() {
     BLE_ASSET_OUT_CHAR_UUID,
     BLECharacteristic::PROPERTY_READ
   );
+
+  // Battery — NOTIFY + READ, {percent, flags}. percent=0xFF means "not wired yet" (see
+  // frame_config.h kBatterySdaPin) rather than absent, so the app can show "unavailable"
+  // instead of guessing from a missing characteristic.
+  gBatteryChar = pService->createCharacteristic(
+    BLE_BATTERY_CHAR_UUID,
+    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+  );
+  gBatteryChar->addDescriptor(new BLE2902());
+  uint8_t initBattery[2] = { 0xFF, 0x00 };
+  gBatteryChar->setValue(initBattery, 2);
+
+  initBatterySense();
 
   pService->start();
 
@@ -1351,6 +1408,26 @@ void loop() {
   FrameCmd c;
   if (gCmdQueue && xQueueReceive(gCmdQueue, &c, 0) == pdTRUE) {
     processCommand(c);
+  }
+
+  // Battery poll — cheap enough to check every loop, gated to ~30s since charge % moves slowly.
+  // Only sets the char + notifies on an actual change, matching notifyStatus's pattern.
+  static uint32_t gNextBatteryPollMs  = 0;
+  static uint8_t  gLastBatteryPercent = 0xFF;
+  static bool     gLastBatteryCharging = false;
+  if ((int32_t)(millis() - gNextBatteryPollMs) >= 0) {
+    gNextBatteryPollMs = millis() + 30000UL;
+    uint8_t percent; bool charging;
+    if (readBatterySense(percent, charging) &&
+        (percent != gLastBatteryPercent || charging != gLastBatteryCharging)) {
+      gLastBatteryPercent  = percent;
+      gLastBatteryCharging = charging;
+      uint8_t payload[2] = { percent, (uint8_t)(charging ? 0x01 : 0x00) };
+      if (gBatteryChar) {
+        gBatteryChar->setValue(payload, 2);
+        if (gBleConnected) gBatteryChar->notify();
+      }
+    }
   }
 
   // Autonomous auto-rotate — no phone needed.
