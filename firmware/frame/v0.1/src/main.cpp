@@ -153,9 +153,8 @@ static void notifyStatus(uint8_t s) {
 
 // ── Battery (resistor-divider ADC) — plinkOS#34 ──────────────────────────────
 static void initBatterySense() {
-  if (!kBatterySenseWired) return;  // dividers not soldered yet — leave ADC unconfigured
-  analogSetPinAttenuation(kBatteryAdcPin, ADC_11db);
-  analogSetPinAttenuation(kVbusAdcPin, ADC_11db);
+  if (kBatteryAdcWired) analogSetPinAttenuation(kBatteryAdcPin, ADC_11db);
+  if (kVbusAdcWired)    analogSetPinAttenuation(kVbusAdcPin, ADC_11db);
 }
 
 // Coarse single-cell LiPo voltage → % curve, linear-interpolated between known rest-voltage
@@ -180,16 +179,35 @@ static uint8_t voltageToPercent(float v) {
   return 0;
 }
 
-// Returns false only when the dividers aren't wired yet (kBatterySenseWired) — caller then keeps
-// notifying "unavailable" (0xFF) instead of a floating-pin garbage reading.
+// Returns false only when battery ADC isn't wired (kBatteryAdcWired) — caller then keeps notifying
+// "unavailable" (0xFF) instead of a floating-pin garbage reading. Charging is independently gated
+// on kVbusAdcWired — reports false (not charging) until that divider is soldered, since VBUS isn't
+// vendor-confirmed pre-routed the way the battery sense line is.
 static bool readBatterySense(uint8_t &percent, bool &charging) {
-  if (!kBatterySenseWired) return false;
+  if (!kBatteryAdcWired) return false;
 
-  float batV = (analogRead(kBatteryAdcPin) / 4095.0f) * 3.3f / kBatteryDividerFactor;
+  int batRaw = analogRead(kBatteryAdcPin);
+  float batV = (batRaw / 4095.0f) * 3.3f / kBatteryDividerFactor;
   percent = voltageToPercent(batV);
 
-  float vbusV = (analogRead(kVbusAdcPin) / 4095.0f) * 3.3f / kVbusDividerFactor;
-  charging = vbusV > kVbusPresentThresholdV;
+  charging = false;
+  int vbusRaw = 0;
+  float vbusV = 0.0f;
+  if (kVbusAdcWired) {
+    vbusRaw = analogRead(kVbusAdcPin);
+    vbusV = (vbusRaw / 4095.0f) * 3.3f / kVbusDividerFactor;
+    charging = vbusV > kVbusPresentThresholdV;
+  }
+
+  if (kBatteryDebugLog) {
+    Serial.printf("[battery] IO%d raw=%d -> %.3fV (calibrated factor=%.4f) -> %d%%",
+                  kBatteryAdcPin, batRaw, batV, kBatteryDividerFactor, percent);
+    if (kVbusAdcWired) {
+      Serial.printf(" | IO%d raw=%d -> %.3fV -> charging=%d\n", kVbusAdcPin, vbusRaw, vbusV, charging);
+    } else {
+      Serial.printf(" | VBUS not wired\n");
+    }
+  }
 
   return true;
 }

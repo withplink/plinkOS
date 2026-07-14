@@ -51,17 +51,31 @@ constexpr int kFrameRotation = 0;
 // IP5306 (eSOP8 package) has no I2C, no STAT/PG pin — confirmed via the Injoinic datasheet itself:
 // the part is 8 pins total (VIN/LED1/LED2/LED3/KEY/BAT/SW/VOUT), physically incapable of I2C. Only
 // larger sibling parts (IP5108/5109/5209/5219, different package) support I2C. So this reads the
-// raw analog nodes directly instead: a resistor divider off IP5306 pin 6 (BAT, raw LiPo+) for
-// percent, and a second divider off VIN (5V charger input) as a "USB present" charging proxy.
-// Stopgap for this dev board only — a real production PCB should use a proper fuel-gauge IC
-// (e.g. MAX17048) instead of a hand-calibrated voltage curve.
-constexpr bool kBatterySenseWired = false;  // TODO(#34): flip true once the two dividers are soldered
-constexpr int  kBatteryAdcPin = 1;   // BAT divider — ADC1 channel (avoids ADC2/WiFi-BT contention)
-constexpr int  kVbusAdcPin    = 8;   // VIN divider — ADC1 channel
+// raw analog nodes directly instead of I2C.
+//
+// GoodDisplay (vendor) confirmed 2026-07-14: the ESP32E6-E01 board already has a battery-voltage
+// divider built in, routed to IO1 — no soldering needed for battery %. Vendor gave the resistor
+// values (47k battery-side, 10k GND-side) on a follow-up after our multimeter reading (~0.7V,
+// flat regardless of battery state) initially looked like IO1 wasn't the sense line at all — turned
+// out our first guessed ratio (10k/22k) was simply wrong, not the pin: 47k/10k against a ~4.1V
+// resting LiPo predicts ~0.72V on IO1, matching the multimeter exactly. IO1 is confirmed correct.
+// Charging/VBUS-present has NO onboard circuit — vendor confirmed "no USB inspection has been
+// performed" on this board, so `kVbusAdcWired` stays false until our own divider is soldered onto VIN.
+constexpr bool kBatteryAdcWired = true;   // IO1 confirmed board-routed by vendor — no soldering needed
+constexpr bool kVbusAdcWired    = false;  // TODO(#34): flip true once our own VIN divider is soldered
+constexpr int  kBatteryAdcPin = 1;   // BAT divider — vendor-confirmed, ADC1 (avoids ADC2/WiFi-BT contention)
+constexpr int  kVbusAdcPin    = 8;   // VIN divider — our own, ADC1 channel
 // Divider ratios (measured node / true node). R1 = node-side resistor, R2 = GND-side resistor.
-constexpr float kBatteryDividerFactor = 22.0f / (10.0f + 22.0f);  // R1=10k, R2=22k → 4.2V→~2.89V
-constexpr float kVbusDividerFactor    = 12.0f / (10.0f + 12.0f);  // R1=10k, R2=12k → 5.5V→~3.0V
+// kBatteryDividerFactor is calibrated from a real measurement (2026-07-14), not the nominal 47k/10k
+// resistor math (0.175) — actual resistors have tolerance. Data point: IO1 raw=821 (0.6616V) against
+// a multimeter reading of 3.92V directly on the battery connector -> factor = 0.6616 / 3.92 = 0.1688.
+constexpr float kBatteryDividerFactor = 0.1688f;  // calibrated, not nominal-resistor-math
+constexpr float kVbusDividerFactor    = 12.0f / (10.0f + 12.0f);  // R1=10k, R2=12k → 5.5V→~3.0V (guess)
 constexpr float kVbusPresentThresholdV = 1.5f;  // divided VIN reads ~0V unplugged, ~2.7V on USB
+// Prints raw ADC counts + computed voltage to Serial on every battery poll (~30s) — turn on while
+// calibrating kBatteryDividerFactor against a multimeter reading of the real battery voltage, off
+// once the factor is confirmed (this is chatty).
+constexpr bool kBatteryDebugLog = true;
 
 // ── BLE control opcodes ──────────────────────────────────────────────────────
 // The control characteristic (WRITE w/ response) carries a 1-byte opcode + payload.
