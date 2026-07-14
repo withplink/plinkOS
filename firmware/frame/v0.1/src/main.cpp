@@ -529,12 +529,18 @@ static void initBle() {
     if (out.size() <= 512) gQueueChar->setValue(out);   // large queues served via GetQueue chunks
   }
 
-  // Asset out — READ (frame→app asset bytes; thumbnail for lists, master for recrop). Loaded on
-  // demand by kBleGetAsset; the app long-reads it after the 0x11 AssetReady notify.
+  // Asset out — NOTIFY + READ (frame→app asset bytes; thumbnail for lists, master for recrop).
+  // Loaded on demand by kBleGetAsset. NOTIFY added for plinkOS#46: the value is pushed directly
+  // via notify() alongside the existing 0x11 AssetReady status notify, so an app that has
+  // subscribed can read it from the just-delivered notify instead of issuing a second explicit
+  // read round-trip — cuts GetChunk's per-slice cost from 3 BLE round-trips to 2. Older app
+  // builds that never call setNotifyValue() for this characteristic simply don't receive these
+  // notifies (NimBLE only delivers to subscribed centrals) and keep working exactly as before.
   gAssetOutChar = pService->createCharacteristic(
     BLE_ASSET_OUT_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ
+    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
   );
+  gAssetOutChar->addDescriptor(new BLE2902());
 
   // Battery — NOTIFY + READ, {percent, flags}. percent=0xFF means "not wired yet" (see
   // frame_config.h kBatterySdaPin) rather than absent, so the app can show "unavailable"
@@ -1236,6 +1242,7 @@ static void handleGetAsset(const FrameCmd &c) {
   gReqPath[sizeof(gReqPath) - 1] = 0;
   uint8_t hdr[4] = { (uint8_t)(gReqLen), (uint8_t)(gReqLen >> 8), (uint8_t)(gReqLen >> 16), (uint8_t)(gReqLen >> 24) };
   gAssetOutChar->setValue(hdr, 4);
+  if (gBleConnected) gAssetOutChar->notify();   // plinkOS#46 — see gAssetOutChar setup comment
   Serial.printf("GetAsset ready: %s (%zu bytes)\n", path, gReqLen);
   notifyStatus(kBleStatusAssetReady);
 }
@@ -1294,6 +1301,7 @@ static void handleGetQueue() {
   gServingQueue = true;
   uint8_t hdr[4] = { (uint8_t)(gReqLen), (uint8_t)(gReqLen >> 8), (uint8_t)(gReqLen >> 16), (uint8_t)(gReqLen >> 24) };
   gAssetOutChar->setValue(hdr, 4);
+  if (gBleConnected) gAssetOutChar->notify();   // plinkOS#46 — see gAssetOutChar setup comment
   Serial.printf("GetQueue ready (%zu bytes)\n", gReqLen);
   notifyStatus(kBleStatusAssetReady);
 }
@@ -1302,12 +1310,18 @@ static void handleGetChunk(const FrameCmd &c) {
   if (!gAssetOutChar) { notifyStatus(kBleStatusError); return; }
   // Queue read-back: serve the slice straight from the staged PSRAM buffer (no SD).
   if (gServingQueue) {
-    if (!gQueueOutBuf || c.offset >= gReqLen) { gAssetOutChar->setValue((uint8_t *)"", 0); notifyStatus(kBleStatusAssetReady); return; }
+    if (!gQueueOutBuf || c.offset >= gReqLen) {
+      gAssetOutChar->setValue((uint8_t *)"", 0);
+      if (gBleConnected) gAssetOutChar->notify();
+      notifyStatus(kBleStatusAssetReady);
+      return;
+    }
     uint16_t want = c.length;
     if (want > 512) want = 512;
     size_t avail = gReqLen - c.offset;
     if (want > avail) want = (uint16_t)avail;
     gAssetOutChar->setValue((uint8_t *)(gQueueOutBuf + c.offset), want);
+    if (gBleConnected) gAssetOutChar->notify();   // plinkOS#46 — see gAssetOutChar setup comment
     notifyStatus(kBleStatusAssetReady);
     return;
   }
@@ -1325,6 +1339,7 @@ static void handleGetChunk(const FrameCmd &c) {
   size_t rd = f.read(buf, want);
   f.close();
   gAssetOutChar->setValue(buf, rd);
+  if (gBleConnected) gAssetOutChar->notify();   // plinkOS#46 — see gAssetOutChar setup comment
   heap_caps_free(buf);
   notifyStatus(kBleStatusAssetReady);
 }
