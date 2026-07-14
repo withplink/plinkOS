@@ -37,6 +37,7 @@ static BLECharacteristic *gStatusChar   = nullptr;
 static BLECharacteristic *gQueueChar    = nullptr;
 static BLECharacteristic *gAssetOutChar = nullptr;
 static BLECharacteristic *gBatteryChar  = nullptr;
+static BLECharacteristic *gInfoChar     = nullptr;
 static Preferences gPrefs;
 static std::string gFrameName;   // canonical frame name, persisted in NVS
 static volatile bool gBleConnected   = false;
@@ -210,6 +211,27 @@ static bool readBatterySense(uint8_t &percent, bool &charging) {
   }
 
   return true;
+}
+
+// [uptimeSec:4 LE][modelLen:1][model bytes][featureFlags:1] — no NUL terminator on the model
+// string, length-prefixed like the other variable-length BLE payloads in this file (label fields
+// in kBleAdd/kBleRename). featureFlags is a trailing append (plinkOS#45) — safe for older app
+// builds that only read `5 + modelLen` bytes and ignore anything past that.
+static constexpr uint8_t kInfoFeatureIndexedBmp = 0x01;  // bit0: firmware decodes 4bpp indexed BMP
+
+static size_t buildInfoPayload(uint8_t *out, size_t outCap) {
+  uint32_t uptimeSec = millis() / 1000UL;
+  size_t modelLen = strlen(kFrameModel);
+  size_t total = 4 + 1 + modelLen + 1;
+  if (total > outCap) { modelLen = outCap - 6; total = outCap; }  // defensive truncation, shouldn't hit
+  out[0] = (uint8_t)(uptimeSec & 0xFF);
+  out[1] = (uint8_t)((uptimeSec >> 8) & 0xFF);
+  out[2] = (uint8_t)((uptimeSec >> 16) & 0xFF);
+  out[3] = (uint8_t)((uptimeSec >> 24) & 0xFF);
+  out[4] = (uint8_t)modelLen;
+  memcpy(out + 5, kFrameModel, modelLen);
+  out[5 + modelLen] = kInfoFeatureIndexedBmp;
+  return total;
 }
 
 // Serialize the in-memory queue into the queue characteristic (long READ) and ping the app
@@ -525,6 +547,20 @@ static void initBle() {
   uint8_t initBattery[2] = { 0xFF, 0x00 };
   gBatteryChar->setValue(initBattery, 2);
 
+  // Info — NOTIFY + READ, [uptimeSec:4 LE][modelLen:1][model]. No BLE opcode existed for this
+  // before (Model/Uptime were hardcoded nil in BLEFrameTransport.status() — plink-ios#33 aside,
+  // the app hid those Settings rows entirely for BLE frames rather than show a permanent "--").
+  gInfoChar = pService->createCharacteristic(
+    BLE_INFO_CHAR_UUID,
+    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+  );
+  gInfoChar->addDescriptor(new BLE2902());
+  {
+    uint8_t initInfo[64];
+    size_t n = buildInfoPayload(initInfo, sizeof(initInfo));
+    gInfoChar->setValue(initInfo, n);
+  }
+
   initBatterySense();
 
   pService->start();
@@ -543,6 +579,10 @@ struct BmpHeader {
   uint16_t bpp         = 0;
   uint32_t compression = 0;
   bool     topDown     = false;
+  // Only populated for bpp==4 (plinkOS#45 indexed asset format) — up to 16 RGBQUAD entries
+  // (B,G,R,reserved) between the 40-byte DIB header and pixelOffset. Unused for bpp==24.
+  uint8_t  colorTable[16][3] = {};
+  int      colorCount        = 0;
 };
 
 static uint32_t readU32LE(File &f) {
@@ -576,9 +616,28 @@ static bool parseBmpHeader(File &f, BmpHeader &hdr) {
   uint16_t planes = readU16LE(f);
   hdr.bpp         = readU16LE(f);
   hdr.compression = readU32LE(f);
-  if (planes != 1)         { Serial.printf("Unsupported planes: %u\n", planes);       return false; }
-  if (hdr.bpp != 24)       { Serial.printf("Unsupported BMP bpp: %u\n", hdr.bpp);     return false; }
-  if (hdr.compression != 0){ Serial.printf("Unsupported compression: %u\n", hdr.compression); return false; }
+  if (planes != 1)                   { Serial.printf("Unsupported planes: %u\n", planes);       return false; }
+  if (hdr.bpp != 24 && hdr.bpp != 4)  { Serial.printf("Unsupported BMP bpp: %u\n", hdr.bpp);     return false; }
+  if (hdr.compression != 0)          { Serial.printf("Unsupported compression: %u\n", hdr.compression); return false; }
+
+  if (hdr.bpp == 4) {
+    // Color table sits right after the DIB header (14-byte file header + dibSize, NOT a
+    // hardcoded 54 — dibSize is only guaranteed >=40, and we've only read 20 of its bytes so
+    // far) and before pixelOffset — up to 16 RGBQUAD (B,G,R,reserved) entries (plinkOS#45).
+    uint32_t colorTableStart = 14 + dibSize;
+    if (!f.seek(colorTableStart)) { Serial.println("Seek to color table failed"); return false; }
+    long tableBytes = (long)hdr.pixelOffset - (long)colorTableStart;
+    hdr.colorCount = (int)(tableBytes / 4);
+    if (hdr.colorCount < 0) hdr.colorCount = 0;
+    if (hdr.colorCount > 16) hdr.colorCount = 16;
+    for (int i = 0; i < hdr.colorCount; i++) {
+      uint8_t rgba[4];
+      if (f.read(rgba, 4) != 4) { Serial.println("Color table read failed"); return false; }
+      hdr.colorTable[i][0] = rgba[2];  // R
+      hdr.colorTable[i][1] = rgba[1];  // G
+      hdr.colorTable[i][2] = rgba[0];  // B
+    }
+  }
   return true;
 }
 
@@ -631,7 +690,20 @@ bool renderBmpFromSd(const char *path) {
     const int dh     = EPD_HEIGHT;
     const int xOff   = (dw - hdr.width)  / 2;
     const int yOff   = (dh - hdr.height) / 2;
-    const int rowSize = ((hdr.width * 3 + 3) / 4) * 4;
+    // 24bpp: 3 bytes/px, row padded to 4 bytes. 4bpp (plinkOS#45): 2px/byte, row padded to 4
+    // bytes — same BMP row-padding rule, different bytes-per-pixel.
+    const int rowSize = (hdr.bpp == 4)
+      ? (((hdr.width + 1) / 2 + 3) / 4) * 4
+      : ((hdr.width * 3 + 3) / 4) * 4;
+
+    // Built once per render, not per pixel — reuses nearestSpectra6Color exactly as before, just
+    // ≤16 times (once per color-table entry) instead of once per pixel (plinkOS#45).
+    uint8_t indexToToken[16] = {};
+    if (hdr.bpp == 4) {
+      for (int i = 0; i < hdr.colorCount; i++) {
+        indexToToken[i] = nearestSpectra6Color(hdr.colorTable[i][0], hdr.colorTable[i][1], hdr.colorTable[i][2]);
+      }
+    }
 
     size_t fbBytes = (size_t)EPD_WIDTH * EPD_HEIGHT;
     fb = (uint8_t *)heap_caps_malloc(fbBytes, MALLOC_CAP_SPIRAM);
@@ -651,10 +723,23 @@ bool renderBmpFromSd(const char *path) {
         Serial.printf("Short read row %d\n", srcRow);
         heap_caps_free(row); heap_caps_free(fb); f.close(); return false;
       }
-      for (int x = 0; x < hdr.width; ++x) {
-        int dx = x + xOff, dy = y + yOff;
-        if (dx >= 0 && dy >= 0 && dx < dw && dy < dh)
-          fb[dy * dw + dx] = nearestSpectra6Color(row[x*3+2], row[x*3+1], row[x*3+0]);
+      if (hdr.bpp == 4) {
+        // High nibble = even x (first pixel in the byte), low nibble = odd x — must match the
+        // Swift writer's packing exactly (Spectra6Ditherer.swift, plinkOS#45).
+        for (int x = 0; x < hdr.width; ++x) {
+          int dx = x + xOff, dy = y + yOff;
+          if (dx >= 0 && dy >= 0 && dx < dw && dy < dh) {
+            uint8_t byte = row[x / 2];
+            uint8_t idx = (x % 2 == 0) ? (byte >> 4) : (byte & 0x0F);
+            fb[dy * dw + dx] = indexToToken[idx];
+          }
+        }
+      } else {
+        for (int x = 0; x < hdr.width; ++x) {
+          int dx = x + xOff, dy = y + yOff;
+          if (dx >= 0 && dy >= 0 && dx < dw && dy < dh)
+            fb[dy * dw + dx] = nearestSpectra6Color(row[x*3+2], row[x*3+1], row[x*3+0]);
+        }
       }
     }
     heap_caps_free(row);
@@ -1445,6 +1530,14 @@ void loop() {
         gBatteryChar->setValue(payload, 2);
         if (gBleConnected) gBatteryChar->notify();
       }
+    }
+    // Uptime changes every tick by definition — no change-gate needed, just republish on the
+    // same cadence as battery (uptime granularity of ~30s is plenty for a Settings-tab display).
+    if (gInfoChar) {
+      uint8_t infoPayload[64];
+      size_t n = buildInfoPayload(infoPayload, sizeof(infoPayload));
+      gInfoChar->setValue(infoPayload, n);
+      if (gBleConnected) gInfoChar->notify();
     }
   }
 

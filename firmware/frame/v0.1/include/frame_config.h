@@ -46,6 +46,11 @@ constexpr int kFrameRotation = 0;
 #define BLE_QUEUE_CHAR_UUID    "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0d3f"  // READ, frame-canonical queue.json
 #define BLE_ASSET_OUT_CHAR_UUID "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0e40" // READ, asset bytes streamed frame→app (long read)
 #define BLE_BATTERY_CHAR_UUID  "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0f51"  // READ+NOTIFY, {percent:1, flags:1} (flags bit0=charging)
+#define BLE_INFO_CHAR_UUID     "f4b8ef7d-1e3a-4b9c-8d2f-6a7c5e9f0f52"  // READ+NOTIFY, [uptimeSec:4 LE][modelLen:1][model][featureFlags:1] (featureFlags added plinkOS#45 — bit0: accepts 4bpp indexed BMP)
+
+// Static hardware identity string, reported over BLE_INFO_CHAR_UUID — mirrors the Pi's
+// get_display_model() equivalent, since BLE frames have no HTTP status endpoint to report this.
+constexpr const char *kFrameModel = "ESP32-S3 / GDEP073E01";
 
 // ── Battery (resistor-divider ADC) — plinkOS#34 ──────────────────────────────
 // IP5306 (eSOP8 package) has no I2C, no STAT/PG pin — confirmed via the Injoinic datasheet itself:
