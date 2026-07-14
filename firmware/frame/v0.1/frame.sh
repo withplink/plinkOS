@@ -39,8 +39,9 @@ echo "────────────────────────�
 echo "  1) Flash firmware"
 echo "  2) Open serial monitor"
 echo "  3) Clear ghosting (panel refresh cycle)"
+echo "  4) Factory reset (delete ALL photos, thumbnails, queue)"
 echo ""
-read -rp "Select [1-3]: " action
+read -rp "Select [1-4]: " action
 echo ""
 
 case "$action" in
@@ -186,6 +187,60 @@ try:
                 deadline = min(deadline, time.time() + 50)   # let the restore-render finish
     if not seen:
         print("\n(!) Never saw 'Clearing ghosting' — firmware may not have the clear handler. "
+              "Reflash dev (option 1), then retry.")
+except KeyboardInterrupt:
+    pass
+finally:
+    s.close()
+PYEOF
+    echo ""
+    echo "Done."
+    ;;
+
+  4)
+    # Sends "wipe" over serial — same handleClear() the BLE kBleClear op (0x2A) runs: empties
+    # queue.json, resets current/interval, and deletes every file under /img, /orig, /thumb.
+    # Irreversible — no undo, and the frame will show nothing until a new photo is sent.
+    echo "!! This deletes ALL photos, thumbnails, and the queue from $PORT's SD card. No undo."
+    read -rp "Type 'wipe' to confirm: " confirm
+    if [[ "$confirm" != "wipe" ]]; then
+      echo "Cancelled."
+      exit 0
+    fi
+    PYBIN="$(command -v python3 || true)"
+    [[ -x "$HOME/.platformio/penv/bin/python" ]] && PYBIN="$HOME/.platformio/penv/bin/python"
+    if [[ -z "$PYBIN" ]]; then echo "python3 not found."; exit 1; fi
+    "$PYBIN" - "$PORT" "$BAUD" <<'PYEOF'
+import sys, time, serial
+port, baud = sys.argv[1], int(sys.argv[2])
+s = serial.Serial()
+s.port = port; s.baudrate = baud
+s.dtr = False; s.rts = False          # try to avoid an auto-reset on open
+s.timeout = 1
+s.open()
+print("Waiting for frame to be ready (boots in ~45s if it reset on connect)...")
+boot_deadline = time.time() + 60
+while time.time() < boot_deadline:
+    line = s.readline()
+    if line:
+        sys.stdout.write(line.decode(errors="replace")); sys.stdout.flush()
+        if b"BLE advertising as" in line:
+            break
+time.sleep(0.5); s.reset_input_buffer()
+s.write(b"wipe\n")
+print("\nSent 'wipe'. Streaming firmware output (Ctrl-C to stop)...\n")
+deadline = time.time() + 15
+seen = False
+try:
+    while time.time() < deadline:
+        line = s.readline()
+        if line:
+            sys.stdout.write(line.decode(errors="replace")); sys.stdout.flush()
+            if b"Queue cleared" in line:
+                seen = True
+                break
+    if not seen:
+        print("\n(!) Never saw 'Queue cleared' — firmware may not have the wipe handler. "
               "Reflash dev (option 1), then retry.")
 except KeyboardInterrupt:
     pass
