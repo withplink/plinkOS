@@ -3,14 +3,11 @@
 #include <SD.h>
 #include <FS.h>
 #include <esp_heap_caps.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include <NimBLEDevice.h>
 #include <Preferences.h>
-#include <esp_gap_ble_api.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <algorithm>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -180,31 +177,58 @@ static uint8_t voltageToPercent(float v) {
   return 0;
 }
 
-// Returns false only when battery ADC isn't wired (kBatteryAdcWired) — caller then keeps notifying
-// "unavailable" (0xFF) instead of a floating-pin garbage reading. Charging is independently gated
-// on kVbusAdcWired — reports false (not charging) until that divider is soldered, since VBUS isn't
-// vendor-confirmed pre-routed the way the battery sense line is.
+// Boot-settle window: the sense rail hasn't stabilized yet right after power-on (BLE radio +
+// display wake load ramping up), producing single-shot ADC noise of up to ±14 points against the
+// eventual resting value (plinkOS#47, 2026-07-15 power-on swing — reproduced with zero charging
+// current involved, so it's a rail-settling artifact, not IR drop). Caller treats a false return
+// the same as "ADC not wired" — keeps publishing the 0xFF "unavailable" sentinel until settled.
+constexpr uint32_t kBatterySettleMs = 4000;
+
+// Returns false when battery ADC isn't wired (kBatteryAdcWired) or the boot-settle window hasn't
+// elapsed yet — caller then keeps notifying "unavailable" (0xFF) instead of a floating-pin or
+// unsettled-rail garbage reading. Charging is independently gated on kVbusAdcWired — reports false
+// (not charging) until that divider is soldered, since VBUS isn't vendor-confirmed pre-routed the
+// way the battery sense line is.
 static bool readBatterySense(uint8_t &percent, bool &charging) {
   if (!kBatteryAdcWired) return false;
+  if (millis() < kBatterySettleMs) return false;
 
-  int batRaw = analogRead(kBatteryAdcPin);
-  float batV = (batRaw / 4095.0f) * 3.3f / kBatteryDividerFactor;
+  // Median of a handful of samples, a few ms apart — collapses the single-shot ADC noise seen at
+  // boot (and generally) into one stable value without touching the IR-drop-while-charging offset,
+  // which is systematic (same source = same skew) and needs current compensation, not averaging.
+  // analogReadMilliVolts() (not raw analogRead()/4095*3.3) — the naive linear formula measurably
+  // under-read this pin: a multimeter cross-check at IO1 read 0.74V while raw math computed
+  // 0.6696V for the same instant (raw=831), a ~9.5% pin-level error that the /kBatteryDividerFactor
+  // divide amplifies ~6x into the reported battery voltage. analogReadMilliVolts() applies the
+  // ESP32's factory eFuse ADC calibration instead of a flat linear mapping.
+  // NOTE: kBatteryDividerFactor (frame_config.h) was calibrated (2026-07-14) against the OLD raw
+  // math's pin-voltage output, not this corrected one — it needs to be re-derived against a fresh
+  // multimeter-at-battery reading now that the pin-voltage math itself changed.
+  constexpr int kSamples = 9;
+  int samplesMv[kSamples];
+  for (int i = 0; i < kSamples; i++) {
+    samplesMv[i] = analogReadMilliVolts(kBatteryAdcPin);
+    if (i < kSamples - 1) delay(2);
+  }
+  std::sort(samplesMv, samplesMv + kSamples);
+  int batMv = samplesMv[kSamples / 2];
+  float batV = (batMv / 1000.0f) / kBatteryDividerFactor;
   percent = voltageToPercent(batV);
 
   charging = false;
-  int vbusRaw = 0;
+  int vbusMv = 0;
   float vbusV = 0.0f;
   if (kVbusAdcWired) {
-    vbusRaw = analogRead(kVbusAdcPin);
-    vbusV = (vbusRaw / 4095.0f) * 3.3f / kVbusDividerFactor;
+    vbusMv = analogReadMilliVolts(kVbusAdcPin);
+    vbusV = (vbusMv / 1000.0f) / kVbusDividerFactor;
     charging = vbusV > kVbusPresentThresholdV;
   }
 
   if (kBatteryDebugLog) {
-    Serial.printf("[battery] IO%d raw=%d -> %.3fV (calibrated factor=%.4f) -> %d%%",
-                  kBatteryAdcPin, batRaw, batV, kBatteryDividerFactor, percent);
+    Serial.printf("[battery] IO%d mv=%d -> %.3fV (calibrated factor=%.4f) -> %d%%",
+                  kBatteryAdcPin, batMv, batV, kBatteryDividerFactor, percent);
     if (kVbusAdcWired) {
-      Serial.printf(" | IO%d raw=%d -> %.3fV -> charging=%d\n", kVbusAdcPin, vbusRaw, vbusV, charging);
+      Serial.printf(" | IO%d mv=%d -> %.3fV -> charging=%d\n", kVbusAdcPin, vbusMv, vbusV, charging);
     } else {
       Serial.printf(" | VBUS not wired\n");
     }
@@ -258,12 +282,12 @@ static void publishQueue() {
 }
 
 class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *) override {
+  void onConnect(BLEServer *, NimBLEConnInfo &) override {
     gBleConnected = true;
     Serial.println("BLE: connected");
     notifyStatus(kBleStatusReady);
   }
-  void onDisconnect(BLEServer *pServer) override {
+  void onDisconnect(BLEServer *pServer, NimBLEConnInfo &, int) override {
     gBleConnected = false;
     Serial.println("BLE: disconnected — restarting advertising");
     // Mid-transfer disconnect: discard the in-flight buffer. A committed-but-unprocessed
@@ -276,9 +300,10 @@ class ServerCallbacks : public BLEServerCallbacks {
 };
 
 class ImageDataCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pChar) override {
-    uint8_t *data = pChar->getData();
-    size_t   len  = pChar->getLength();
+  void onWrite(BLECharacteristic *pChar, NimBLEConnInfo &) override {
+    NimBLEAttValue val = pChar->getValue();
+    const uint8_t *data = val.data();
+    size_t         len  = val.size();
     if (!len) return;
 
     if (!gBleBuffer) {
@@ -310,10 +335,11 @@ class ImageDataCallbacks : public BLECharacteristicCallbacks {
 // directly (PSRAM only, no SD I/O); queue ops are copied into a FreeRTOS command and
 // drained in loop() so all SD/render work stays off the BLE task.
 class ControlCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pChar) override {
-    size_t n = pChar->getLength();
+  void onWrite(BLECharacteristic *pChar, NimBLEConnInfo &) override {
+    NimBLEAttValue val = pChar->getValue();
+    size_t n = val.size();
     if (!n) return;
-    const uint8_t *d = pChar->getData();
+    const uint8_t *d = val.data();
     uint8_t op = d[0];
 
     if (op == kBleAbort) {
@@ -431,17 +457,18 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
 
 // Frame name — canonical on the device, persisted in NVS, set by the app over BLE.
 class NameCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pChar) override {
-    size_t n = pChar->getLength();
+  void onWrite(BLECharacteristic *pChar, NimBLEConnInfo &) override {
+    NimBLEAttValue val = pChar->getValue();
+    size_t n = val.size();
     if (n == 0) return;
-    std::string name((const char *)pChar->getData(), n);
+    std::string name((const char *)val.data(), n);
     gFrameName = name;
     gPrefs.begin("frame", false);
     gPrefs.putString("name", gFrameName.c_str());
     gPrefs.end();
     pChar->setValue(gFrameName);
     // Update the connected-device GAP name…
-    esp_ble_gap_set_device_name(gFrameName.c_str());
+    BLEDevice::setDeviceName(gFrameName);
     // …and rebuild the advertising/scan-response payload so the new name actually
     // broadcasts. The app disconnects right after this write; onDisconnect →
     // startAdvertising() then sends the rebuilt scan-response — no reboot needed (#2).
@@ -457,6 +484,14 @@ class NameCallbacks : public BLECharacteristicCallbacks {
 // rename rebuild it live — the default caches the init-time name and startAdvertising()
 // replays stale bytes, so the old name kept broadcasting until reboot (#2). Does not start
 // advertising; callers start (initBle) or rely on onDisconnect → startAdvertising() (rename).
+//
+// plink-ios#52 (busy-flag manufacturer data + advertise-while-connected) was attempted and
+// reverted 2026-07-15: even with the advertising interval slowed to 1s, continuous non-
+// connectable advertising alongside a live GATT connection caused intermittent radio
+// contention on this single-antenna chip — confirmed on hardware as missed connection events
+// mid-transfer (random drops, corrupted/truncated chunked GetQueue reads). Revisit with a
+// gentler design (e.g. brief periodic adv bursts instead of continuous) and real two-phone
+// hardware test time before re-attempting — see docs/meta/fable-problem-log.md entry 1.
 static void applyAdvertising() {
   BLEAdvertising *pAdv = BLEDevice::getAdvertising();
   pAdv->stop();
@@ -469,8 +504,6 @@ static void applyAdvertising() {
   BLEAdvertisementData scanResp;
   scanResp.setName(gFrameName);
   pAdv->setScanResponseData(scanResp);
-
-  pAdv->setMinPreferred(0x06);
 }
 
 static void initBle() {
@@ -485,35 +518,34 @@ static void initBle() {
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
-  BLEService *pService = pServer->createService(BLEUUID(BLE_SERVICE_UUID), 30);
+  BLEService *pService = pServer->createService(BLEUUID(BLE_SERVICE_UUID));
 
   // Image data — WRITE_NR for max throughput (no per-packet ACK)
   BLECharacteristic *pImgChar = pService->createCharacteristic(
     BLE_IMG_DATA_CHAR_UUID,
-    BLECharacteristic::PROPERTY_WRITE_NR
+    NIMBLE_PROPERTY::WRITE_NR
   );
   pImgChar->setCallbacks(new ImageDataCallbacks());
 
   // Control — WRITE (with response so sender knows the command was received)
   BLECharacteristic *pCtrlChar = pService->createCharacteristic(
     BLE_CONTROL_CHAR_UUID,
-    BLECharacteristic::PROPERTY_WRITE
+    NIMBLE_PROPERTY::WRITE
   );
   pCtrlChar->setCallbacks(new ControlCallbacks());
 
   // Status — NOTIFY + READ (read on connect; notify on state change)
   gStatusChar = pService->createCharacteristic(
     BLE_STATUS_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ
   );
-  gStatusChar->addDescriptor(new BLE2902());
   uint8_t initStatus = kBleStatusReady;
   gStatusChar->setValue(&initStatus, 1);
 
   // Name — READ (app syncs canonical name) + WRITE (app renames, persisted to NVS)
   BLECharacteristic *pNameChar = pService->createCharacteristic(
     BLE_NAME_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
+    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
   );
   pNameChar->setValue(gFrameName);
   pNameChar->setCallbacks(new NameCallbacks());
@@ -521,7 +553,7 @@ static void initBle() {
   // Queue — READ (frame-canonical queue.json; ATT long-read for values > MTU)
   gQueueChar = pService->createCharacteristic(
     BLE_QUEUE_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ
+    NIMBLE_PROPERTY::READ
   );
   {
     std::string out;
@@ -538,18 +570,15 @@ static void initBle() {
   // notifies (NimBLE only delivers to subscribed centrals) and keep working exactly as before.
   gAssetOutChar = pService->createCharacteristic(
     BLE_ASSET_OUT_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ
   );
-  gAssetOutChar->addDescriptor(new BLE2902());
-
   // Battery — NOTIFY + READ, {percent, flags}. percent=0xFF means "not wired yet" (see
   // frame_config.h kBatterySdaPin) rather than absent, so the app can show "unavailable"
   // instead of guessing from a missing characteristic.
   gBatteryChar = pService->createCharacteristic(
     BLE_BATTERY_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ
   );
-  gBatteryChar->addDescriptor(new BLE2902());
   uint8_t initBattery[2] = { 0xFF, 0x00 };
   gBatteryChar->setValue(initBattery, 2);
 
@@ -558,9 +587,8 @@ static void initBle() {
   // the app hid those Settings rows entirely for BLE frames rather than show a permanent "--").
   gInfoChar = pService->createCharacteristic(
     BLE_INFO_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ
   );
-  gInfoChar->addDescriptor(new BLE2902());
   {
     uint8_t initInfo[64];
     size_t n = buildInfoPayload(initInfo, sizeof(initInfo));
@@ -569,7 +597,7 @@ static void initBle() {
 
   initBatterySense();
 
-  pService->start();
+  // NimBLEService::start() is a deprecated no-op — services start with the server (BLEDevice::init).
 
   applyAdvertising();
   BLEDevice::startAdvertising();

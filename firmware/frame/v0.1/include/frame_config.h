@@ -74,7 +74,12 @@ constexpr int  kVbusAdcPin    = 8;   // VIN divider — our own, ADC1 channel
 // kBatteryDividerFactor is calibrated from a real measurement (2026-07-14), not the nominal 47k/10k
 // resistor math (0.175) — actual resistors have tolerance. Data point: IO1 raw=821 (0.6616V) against
 // a multimeter reading of 3.92V directly on the battery connector -> factor = 0.6616 / 3.92 = 0.1688.
-constexpr float kBatteryDividerFactor = 0.1688f;  // calibrated, not nominal-resistor-math
+// STALE as of 2026-07-15: main.cpp's readBatterySense() switched from raw analogRead()/4095*3.3
+// math to analogReadMilliVolts() (eFuse-calibrated) after a multimeter cross-check at IO1 (0.74V)
+// caught the raw math under-reading the pin by ~9.5% (0.6696V computed for the same instant). This
+// factor was derived against the OLD raw math's pin-voltage output, not the new one — needs a fresh
+// multimeter-at-battery reading + IO1 mv= log line to re-derive, same procedure as the original.
+constexpr float kBatteryDividerFactor = 0.1688f;  // calibrated against pre-2026-07-15 raw ADC math — needs redo
 constexpr float kVbusDividerFactor    = 12.0f / (10.0f + 12.0f);  // R1=10k, R2=12k → 5.5V→~3.0V (guess)
 constexpr float kVbusPresentThresholdV = 1.5f;  // divided VIN reads ~0V unplugged, ~2.7V on USB
 // Prints raw ADC counts + computed voltage to Serial on every battery poll (~30s) — turn on while
