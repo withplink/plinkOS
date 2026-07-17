@@ -143,6 +143,21 @@ static uint32_t rdU32LE(const uint8_t *p) {
 }
 static uint16_t rdU16LE(const uint8_t *p) { return (uint16_t)p[0] | ((uint16_t)p[1] << 8); }
 
+// plinkOS#41 (defense-in-depth; app-side fix is plink-ios#39): shrinks `len` so it never splits a
+// UTF-8 codepoint mid-sequence. The app now truncates labels on a UTF-8 boundary before sending,
+// but a raw byte-count cap here alone previously let a mismatched/old client corrupt queue.json
+// with invalid UTF-8, which threw on the next JSON decode. Deliberately conservative: if the byte
+// right at the cut is a trailing continuation byte, or the preceding lead byte's sequence would be
+// cut short, both get dropped — occasionally trims one valid trailing character short rather than
+// risk keeping a partial one.
+static size_t utf8SafeLen(const uint8_t *p, size_t len) {
+  size_t n = len;
+  while (n > 0 && (p[n - 1] & 0xC0) == 0x80) n--;   // drop trailing continuation bytes
+  if (n == 0) return 0;
+  if (p[n - 1] & 0x80) return n - 1;                // multi-byte lead with 0 continuation bytes kept
+  return n;                                          // ASCII — complete
+}
+
 static void bmpPathForId(uint32_t id, char *out, size_t n)   { snprintf(out, n, "%s/%08lX.bmp", kImgDir,   (unsigned long)id); }
 static void origPathForId(uint32_t id, char *out, size_t n)  { snprintf(out, n, "%s/%08lX.jpg", kOrigDir,  (unsigned long)id); }
 static void thumbPathForId(uint32_t id, char *out, size_t n) { snprintf(out, n, "%s/%08lX.jpg", kThumbDir, (unsigned long)id); }
@@ -418,6 +433,7 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
       size_t rem = n - 7;
       size_t labLen = (ll < rem) ? ll : rem;
       if (labLen > sizeof(c.label) - 1) labLen = sizeof(c.label) - 1;
+      labLen = utf8SafeLen(p, labLen);
       memcpy(c.label, p, labLen); c.label[labLen] = 0;
       size_t assetOff = 7 + ll;
       if (assetOff < n) {
@@ -442,6 +458,7 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
       c.idx = d[1];
       size_t labLen = n - 2;
       if (labLen > sizeof(c.label) - 1) labLen = sizeof(c.label) - 1;
+      labLen = utf8SafeLen(d + 2, labLen);
       memcpy(c.label, d + 2, labLen); c.label[labLen] = 0;
     } else if (op == kBleGetAsset) {
       if (n < 6) { notifyStatus(kBleStatusError); return; }
