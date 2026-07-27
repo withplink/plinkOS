@@ -73,9 +73,14 @@ case "$action" in
       fi
     done
     echo ""
-    read -rp "Select [1-${#releases[@]}]: " choice
+    # Staging (dev) is always appended last when present, so the last entry is always the
+    # newest build available (dev if it exists, else the highest-numbered release) — default
+    # to it on a bare Enter.
+    read -rp "Select [1-${#releases[@]}] (Enter = latest): " choice
 
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#releases[@]} )); then
+    if [[ -z "$choice" ]]; then
+      choice="${#releases[@]}"
+    elif ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#releases[@]} )); then
       echo "Invalid selection."
       exit 1
     fi
