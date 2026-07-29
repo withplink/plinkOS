@@ -133,18 +133,18 @@ case "$action" in
     echo ""
 
     if [[ "$open_monitor" == "y" || "$open_monitor" == "Y" ]]; then
-      echo "Opening monitor on $PORT @ $BAUD"
+      echo "Opening monitor on $PORT @ $BAUD (also logging to platformio-device-monitor-*.log)"
       echo "Quit: Ctrl-C"
       read -rp "Press Enter to open: "
-      pio device monitor -p "$PORT" -b "$BAUD"
+      pio device monitor -p "$PORT" -b "$BAUD" --filter log2file --filter time
     fi
     ;;
 
   2)
-    echo "Opening monitor on $PORT @ $BAUD"
+    echo "Opening monitor on $PORT @ $BAUD (also logging to platformio-device-monitor-*.log)"
     echo "Quit: Ctrl-C"
     read -rp "Press Enter to open: "
-    pio device monitor -p "$PORT" -b "$BAUD"
+    pio device monitor -p "$PORT" -b "$BAUD" --filter log2file --filter time
     ;;
 
   3)
@@ -206,7 +206,8 @@ PYEOF
     # Sends "wipe" over serial — same handleClear() the BLE kBleClear op (0x2A) runs: empties
     # queue.json, resets current/interval, and deletes every file under /img, /orig, /thumb.
     # Irreversible — no undo, and the frame will show nothing until a new photo is sent.
-    echo "!! This deletes ALL photos, thumbnails, and the queue from $PORT's SD card. No undo."
+    echo "!! This deletes ALL photos, thumbnails, and the queue from $PORT's SD card, and forgets"
+    echo "!! every paired phone (re-pairing needs the pairing window). No undo."
     read -rp "Type 'wipe' to confirm: " confirm
     if [[ "$confirm" != "wipe" ]]; then
       echo "Cancelled."
@@ -243,7 +244,9 @@ try:
             sys.stdout.write(line.decode(errors="replace")); sys.stdout.flush()
             if b"Queue cleared" in line:
                 seen = True
-                break
+                # plinkOS#48: bond/paired-device clearing prints a couple more lines right after
+                # this — give them a moment to arrive instead of closing the port immediately.
+                deadline = min(deadline, time.time() + 1.0)
     if not seen:
         print("\n(!) Never saw 'Queue cleared' — firmware may not have the wipe handler. "
               "Reflash dev (option 1), then retry.")

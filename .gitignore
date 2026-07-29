@@ -4,3 +4,4 @@ __pycache__/
 pi-scripts/default-image.*
 pi-scripts/.DS_Store
 .pio/
+platformio-device-monitor-*.log
