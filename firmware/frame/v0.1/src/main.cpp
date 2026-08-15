@@ -369,6 +369,13 @@ class ServerCallbacks : public BLEServerCallbacks {
     // that handshake can even start, if we're outside the pairing window. Already-bonded devices
     // (isBonded() is a stored-bond lookup, independent of this connection's current encryption
     // state) always pass through untouched.
+    // TEMP DEBUG (plink-ios first-pair "peer removed pairing information" investigation) —
+    // logging millis() + full bond state at every connect/disconnect/auth event so a repro's
+    // serial log can be timeline-correlated against the phone's [BLE reconnect] Xcode log.
+    // Remove once root-caused.
+    Serial.printf("BLE DEBUG [t=%lu]: onConnect %s isBonded=%d pairingWindowOpen=%d gPairingWindowUntilMs=%lu\n",
+                  millis(), connInfo.getIdAddress().toString().c_str(),
+                  NimBLEDevice::isBonded(connInfo.getIdAddress()), pairingWindowOpen(), gPairingWindowUntilMs);
     if (!NimBLEDevice::isBonded(connInfo.getIdAddress()) && !pairingWindowOpen()) {
       Serial.printf("BLE: rejecting new-device connection (pairing window closed): %s\n",
                     connInfo.getIdAddress().toString().c_str());
@@ -385,6 +392,9 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override {
     gBleConnected = false;
+    Serial.printf("BLE DEBUG [t=%lu]: onDisconnect %s reason=0x%02X isBonded=%d\n",
+                  millis(), connInfo.getIdAddress().toString().c_str(), reason,
+                  NimBLEDevice::isBonded(connInfo.getIdAddress()));
     Serial.printf("BLE: disconnected (reason=0x%02X) %s — restarting advertising\n",
                   reason, connInfo.getIdAddress().toString().c_str());
     // Mid-transfer disconnect: discard the in-flight buffer. A committed-but-unprocessed
@@ -400,6 +410,9 @@ class ServerCallbacks : public BLEServerCallbacks {
     pServer->startAdvertising();
   }
   void onAuthenticationComplete(NimBLEConnInfo &connInfo) override {
+    Serial.printf("BLE DEBUG [t=%lu]: onAuthenticationComplete %s connInfo.isBonded=%d NimBLEDevice::isBonded=%d encrypted=%d\n",
+                  millis(), connInfo.getIdAddress().toString().c_str(),
+                  connInfo.isBonded(), NimBLEDevice::isBonded(connInfo.getIdAddress()), connInfo.isEncrypted());
     Serial.printf("BLE: bonding %s (encrypted=%d)\n",
                   connInfo.isBonded() ? "complete" : "failed",
                   connInfo.isEncrypted());
@@ -1601,6 +1614,9 @@ static void processCommand(FrameCmd &c) {
       if (!srv || srv->getConnectedCount() == 0) break;
       NimBLEConnInfo peer = srv->getPeerInfo(0);
       NimBLEAddress peerAddr = peer.getIdAddress();
+      Serial.printf("BLE DEBUG [t=%lu]: kBleIdentify received for %s connInfo.isBonded=%d NimBLEDevice::isBonded=%d encrypted=%d\n",
+                    millis(), peerAddr.toString().c_str(), peer.isBonded(),
+                    NimBLEDevice::isBonded(peerAddr), peer.isEncrypted());
       int idx = findPairedDeviceIndex(peerAddr);
       if (idx < 0) {
         // First identify for this (already-bonded — this op is WRITE_ENC-only) address: enroll it.
