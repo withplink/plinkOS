@@ -1614,9 +1614,19 @@ static void processCommand(FrameCmd &c) {
       if (!srv || srv->getConnectedCount() == 0) break;
       NimBLEConnInfo peer = srv->getPeerInfo(0);
       NimBLEAddress peerAddr = peer.getIdAddress();
-      Serial.printf("BLE DEBUG [t=%lu]: kBleIdentify received for %s connInfo.isBonded=%d NimBLEDevice::isBonded=%d encrypted=%d\n",
-                    millis(), peerAddr.toString().c_str(), peer.isBonded(),
-                    NimBLEDevice::isBonded(peerAddr), peer.isEncrypted());
+      // TEMP DEBUG cont'd — checking whether address resolution (raw OTA address -> resolved
+      // identity address) could lag behind kBleIdentify's timing and cause an intermittent
+      // false "enroll" (idx<0) when a real stored entry exists under the true resolved address.
+      // Logs the raw address alongside the resolved one, plus the full paired-devices table, so a
+      // "connects clean when it shouldn't" repro shows whether they actually differ.
+      Serial.printf("BLE DEBUG [t=%lu]: kBleIdentify rawAddr=%s idAddr=%s connInfo.isBonded=%d NimBLEDevice::isBonded=%d encrypted=%d\n",
+                    millis(), peer.getAddress().toString().c_str(), peerAddr.toString().c_str(),
+                    peer.isBonded(), NimBLEDevice::isBonded(peerAddr), peer.isEncrypted());
+      for (int i = 0; i < kMaxPairedDevices; i++) {
+        if (!gPairedDevices[i].valid) continue;
+        NimBLEAddress stored(gPairedDevices[i].addr, gPairedDevices[i].addrType);
+        Serial.printf("BLE DEBUG   gPairedDevices[%d]: addr=%s name=%s\n", i, stored.toString().c_str(), gPairedDevices[i].name);
+      }
       int idx = findPairedDeviceIndex(peerAddr);
       if (idx < 0) {
         // First identify for this (already-bonded — this op is WRITE_ENC-only) address: enroll it.
