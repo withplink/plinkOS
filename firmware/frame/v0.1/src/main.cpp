@@ -3,6 +3,7 @@
 #include <SD.h>
 #include <FS.h>
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <NimBLEDevice.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
@@ -52,6 +53,16 @@ static size_t     gBleBufferLen = 0;
 static StreamKind gStreamKind   = STREAM_NONE;
 static uint32_t   gStreamId     = 0;
 static const size_t kBleBufferMax = 1300000; // 1.3 MB (display BMP ≈ 1.15 MB; master JPEG ≈ 0.3 MB)
+
+// plinkOS#43: BeginAsset originally carried only kind+id — no expected length, no checksum. BLE
+// link-layer CRC protects each packet, but an app-side bug, an out-of-order abort/begin race, or a
+// dropped WRITE_NR during controller stress could silently commit a truncated/garbled asset with no
+// error anywhere (the panel then just renders garbage). Extended BeginAsset payload (backward
+// compatible — gated on payload length, n>=14 vs the original n>=6) to carry expectedLen+CRC32; an
+// old app build without them still streams unverified exactly as before, just no longer protected.
+static uint32_t gStreamExpectedLen = 0;
+static uint32_t gStreamExpectedCrc = 0;
+static bool     gStreamHasIntegrity = false;
 
 // plink-ios#52 busy-flag: while connected, fire a short non-connectable adv burst every
 // kBusyBurstIntervalMs (only when idle between transfers — see loop()) so a second phone
@@ -108,6 +119,46 @@ static void loadPairedDevices() {
     gPrefs.getBytes("devices", gPairedDevices, sizeof(gPairedDevices));
   }
   gPrefs.end();
+}
+
+// plinkOS restart-button-vs-switch-toggle repair mystery: no code difference is known between an
+// abrupt EN-pin reset and esp_restart(), but a physical EN reset could in theory interrupt an NVS
+// write to the "pairing" namespace mid-flight (unlike the graceful esp_restart() path). This is a
+// passive, always-on breadcrumb (not gated behind a live-monitor repro) so whenever the bug next
+// happens, the boot immediately after it has the evidence needed on the very first serial line: the
+// reset reason, and whether gPairedDevices still agrees with NimBLE's own bond store count. A
+// mismatch between the two would confirm a torn/lost NVS write; if the reset reason is ever a
+// brownout/panic (not RST or SW), abrupt power loss (not the switch itself) is the trigger instead.
+static const char *resetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT (EN pin / reset button)";
+    case ESP_RST_SW:        return "SW (esp_restart)";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT (other)";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "UNKNOWN";
+  }
+}
+
+static void logBootBondState() {
+  esp_reset_reason_t reason = esp_reset_reason();
+  Serial.printf("BOOT: reset reason = %s (%d)\n", resetReasonStr(reason), (int)reason);
+
+  int nvsCount = 0;
+  for (int i = 0; i < kMaxPairedDevices; i++) {
+    if (!gPairedDevices[i].valid) continue;
+    nvsCount++;
+    NimBLEAddress stored(gPairedDevices[i].addr, gPairedDevices[i].addrType);
+    Serial.printf("BOOT: gPairedDevices[%d]: addr=%s name=%s\n", i, stored.toString().c_str(), gPairedDevices[i].name);
+  }
+  int nimbleCount = NimBLEDevice::getNumBonds();
+  Serial.printf("BOOT: pairing NVS entries=%d, NimBLE bond store entries=%d%s\n",
+                nvsCount, nimbleCount, (nvsCount != nimbleCount) ? "  <-- MISMATCH" : "");
 }
 
 static void savePairedDevices() {
@@ -193,6 +244,23 @@ static uint32_t rdU32LE(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 static uint16_t rdU16LE(const uint8_t *p) { return (uint16_t)p[0] | ((uint16_t)p[1] << 8); }
+
+// plinkOS#43: standard CRC-32 (poly 0xEDB88320, init/final-xor 0xFFFFFFFF — the common "CRC-32/
+// ISO-HDLC" variant used by zlib, PNG, gzip, etc.). Deliberately NOT esp_rom_crc32_le — the ROM
+// variant's init-value convention isn't guaranteed to match a from-scratch Swift implementation on
+// the app side, and a silent algorithm mismatch would make every check fail (or worse, pass
+// wrongly). This bitwise version is slower than a table-based one but assets only need one pass at
+// COMMIT time, not a hot path — simplicity/no-256-entry-table-to-keep-in-sync wins here.
+static uint32_t crc32(const uint8_t *data, size_t len) {
+  uint32_t crc = 0xFFFFFFFF;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (int k = 0; k < 8; k++) {
+      crc = (crc >> 1) ^ (0xEDB88320u & (~(crc & 1u) + 1u));
+    }
+  }
+  return ~crc;
+}
 
 // plinkOS#41 (defense-in-depth; app-side fix is plink-ios#39): shrinks `len` so it never splits a
 // UTF-8 codepoint mid-sequence. The app now truncates labels on a UTF-8 boundary before sending,
@@ -451,6 +519,7 @@ class ImageDataCallbacks : public BLECharacteristicCallbacks {
       gBleBuffer    = nullptr;
       gBleBufferLen = 0;
       gStreamKind   = STREAM_NONE;
+      gStreamHasIntegrity = false;
       notifyStatus(kBleStatusError);
       return;
     }
@@ -474,6 +543,7 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
       if (gBleBuffer) { heap_caps_free(gBleBuffer); gBleBuffer = nullptr; }
       gBleBufferLen = 0;
       gStreamKind   = STREAM_NONE;
+      gStreamHasIntegrity = false;
       Serial.println("BLE: ABORT — buffer discarded");
       notifyStatus(kBleStatusReady);
       return;
@@ -492,7 +562,17 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
                     : (kind == kAssetThumb) ? STREAM_THUMB
                     : (kind == kAssetCrop)  ? STREAM_CROP : STREAM_BMP;
       gStreamId     = rdU32LE(d + 2);
-      Serial.printf("BLE: BEGIN_ASSET kind=%u id=%08lX\n", gStreamKind, (unsigned long)gStreamId);
+      // plinkOS#43: optional integrity fields, see frame_config.h's kBleBeginAsset comment.
+      gStreamHasIntegrity = (n >= 14);
+      if (gStreamHasIntegrity) {
+        gStreamExpectedLen = rdU32LE(d + 6);
+        gStreamExpectedCrc = rdU32LE(d + 10);
+      } else {
+        gStreamExpectedLen = 0;
+        gStreamExpectedCrc = 0;
+      }
+      Serial.printf("BLE: BEGIN_ASSET kind=%u id=%08lX%s\n", gStreamKind, (unsigned long)gStreamId,
+                    gStreamHasIntegrity ? " (integrity-checked)" : "");
       notifyStatus(kBleStatusReceiving);
       return;
     }
@@ -503,15 +583,38 @@ class ControlCallbacks : public BLECharacteristicCallbacks {
 
     if (op == kBleCommit) {
       if (!gBleBuffer) { Serial.println("BLE: COMMIT with no pending data"); notifyStatus(kBleStatusError); return; }
+      // plinkOS#43: verify before handing off to loop() — a truncated/garbled buffer must never
+      // reach SD. Skipped entirely (unverified, as before) if BeginAsset didn't carry the new
+      // integrity fields (older app build).
+      if (gStreamHasIntegrity) {
+        bool lenOk = (gBleBufferLen == gStreamExpectedLen);
+        uint32_t actualCrc = lenOk ? crc32(gBleBuffer, gBleBufferLen) : 0;
+        bool crcOk = lenOk && (actualCrc == gStreamExpectedCrc);
+        if (!lenOk || !crcOk) {
+          Serial.printf("BLE: COMMIT failed integrity check kind=%u id=%08lX — expectedLen=%lu gotLen=%zu expectedCrc=%08lX gotCrc=%08lX\n",
+                        gStreamKind, (unsigned long)gStreamId, (unsigned long)gStreamExpectedLen, gBleBufferLen,
+                        (unsigned long)gStreamExpectedCrc, (unsigned long)actualCrc);
+          heap_caps_free(gBleBuffer);
+          gBleBuffer    = nullptr;
+          gBleBufferLen = 0;
+          gStreamKind   = STREAM_NONE;
+          gStreamHasIntegrity = false;
+          notifyStatus(kBleStatusBadAsset);
+          return;
+        }
+      }
       // Hand buffer ownership to loop(); next BeginAsset allocates afresh.
       c.kind   = gStreamKind;
       c.id     = gStreamId;
       c.buf    = gBleBuffer;
       c.bufLen = gBleBufferLen;
+      bool wasVerified = gStreamHasIntegrity;
       gBleBuffer    = nullptr;
       gBleBufferLen = 0;
       gStreamKind   = STREAM_NONE;
-      Serial.printf("BLE: COMMIT kind=%u id=%08lX (%zu bytes) → loop\n", c.kind, (unsigned long)c.id, c.bufLen);
+      gStreamHasIntegrity = false;
+      Serial.printf("BLE: COMMIT kind=%u id=%08lX (%zu bytes)%s → loop\n", c.kind, (unsigned long)c.id, c.bufLen,
+                    wasVerified ? " [verified]" : "");
     } else if (op == kBleAdd) {
       if (n < 7) { notifyStatus(kBleStatusError); return; }
       c.showNow = d[1];
@@ -785,6 +888,7 @@ static void initBle() {
 
   initBatterySense();
   loadPairedDevices();   // plinkOS#48
+  logBootBondState();    // passive breadcrumb for restart-button-vs-toggle re-pair mystery
 
   // NimBLEService::start() is a deprecated no-op — services start with the server (BLEDevice::init).
 
