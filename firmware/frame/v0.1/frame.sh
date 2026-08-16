@@ -8,13 +8,17 @@ CHIP="esp32s3"
 BAUD=115200
 
 # ── Port detection ────────────────────────────────────────────────────────────
+# plinkOS#35: usbserial-* is the UART bridge port; usbmodem-* is the DevKitC-1's native-USB
+# (USB-Serial-JTAG) port — much faster to flash, no external bridge chip. Both are recognized;
+# which one is "the frame" depends on which cable is plugged in, so if more than one port shows
+# up the existing picker below just lets you choose.
 ports=()
-for p in /dev/cu.usbserial-*; do
+for p in /dev/cu.usbserial-* /dev/cu.usbmodem*; do
   [[ -e "$p" ]] && ports+=("$p")
 done
 
 if [[ ${#ports[@]} -eq 0 ]]; then
-  echo "No /dev/cu.usbserial-* found. Connect the UART port and retry."
+  echo "No /dev/cu.usbserial-* or /dev/cu.usbmodem* found. Connect the frame and retry."
   exit 1
 elif [[ ${#ports[@]} -eq 1 ]]; then
   PORT="${ports[0]}"
@@ -135,7 +139,6 @@ case "$action" in
     if [[ "$open_monitor" == "y" || "$open_monitor" == "Y" ]]; then
       echo "Opening monitor on $PORT @ $BAUD (also logging to platformio-device-monitor-*.log)"
       echo "Quit: Ctrl-C"
-      read -rp "Press Enter to open: "
       pio device monitor -p "$PORT" -b "$BAUD" --filter log2file --filter time
     fi
     ;;
@@ -143,7 +146,6 @@ case "$action" in
   2)
     echo "Opening monitor on $PORT @ $BAUD (also logging to platformio-device-monitor-*.log)"
     echo "Quit: Ctrl-C"
-    read -rp "Press Enter to open: "
     pio device monitor -p "$PORT" -b "$BAUD" --filter log2file --filter time
     ;;
 

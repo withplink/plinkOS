@@ -103,6 +103,10 @@ constexpr bool kBatteryDebugLog = true;
 constexpr uint8_t kBleAbort       = 0x00;  // discard the in-flight stream buffer
 constexpr uint8_t kBleCommit      = 0x01;  // finalize the streamed asset → SD (routed by kind)
 constexpr uint8_t kBleBeginAsset  = 0x10;  // [kind:1][id:4 LE] — start a tagged asset stream
+                                           //   plinkOS#43: optionally followed by [expectedLen:4 LE]
+                                           //   [crc32:4 LE] (payload n>=14) for streamed-write integrity
+                                           //   verification at COMMIT. Omitted (n==6) → unverified, as
+                                           //   before — backward compatible with older app builds.
 // Queue ops (port the Pi /api/queue/* set; frame owns queue.json):
 constexpr uint8_t kBleAdd         = 0x20;  // [show_now:1][id:4 LE][labelLen:1][label][assetId]
 constexpr uint8_t kBleRemove      = 0x21;  // [idx:1]
@@ -150,6 +154,8 @@ constexpr uint8_t kBleStatusAssetMissing = 0x12;  // requested asset not on SD
 // treats as identify failing. Without this ack, a revoked/mismatched device had a real window
 // (one full BLE round trip) to read frame data before the mismatch check ran.
 constexpr uint8_t kBleStatusIdentifyOk   = 0x13;
+constexpr uint8_t kBleStatusBadAsset     = 0x14;  // plinkOS#43: COMMIT failed length/CRC32 check —
+                                                  // buffer discarded, nothing written to SD, app should retry
 constexpr uint8_t kBleStatusError        = 0xFF;
 
 // Queue limits (v0.1)
