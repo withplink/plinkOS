@@ -84,7 +84,7 @@ During setup you'll be prompted for:
 The script will:
 - Wait for the Pi to come online
 - Set static IP `192.168.1.50`
-- Enable SPI + add `dtoverlay=spi0-0cs` (required for the display)
+- Enable SPI (`dtparam=spi=on`); `dtoverlay=spi0-0cs` is deliberately not added — see Critical boot config
 - Disable WiFi power save
 - Install all Python and system dependencies
 - Deploy the webserver and frontend
@@ -161,10 +161,9 @@ The following must be present in `/boot/firmware/config.txt`:
 
 ```
 dtparam=spi=on
-dtoverlay=spi0-0cs
 ```
 
-The `spi0-0cs` overlay disables the SPI driver's chip-select claim on GPIO8, which conflicts with the Inky library's gpiod pin requests. Without it, `show()` fails with "Chip Select: (line 8, GPIO8) currently claimed by spi0 CS0".
+`dtoverlay=spi0-0cs` (disables the SPI driver's chip-select claim on GPIO8) is **not currently applied**: the setup scripts remove it and the Inky patch below handles the CS pin. The frame works this way (verified 2026-11-21). **If the display ever breaks** (silent no-update after an OS/Inky upgrade, or "Chip Select: (line 8, GPIO8) currently claimed by spi0 CS0"), adding the overlay and rebooting is one of the first things to try. Pi prototype only.
 
 ### Inky library patch
 

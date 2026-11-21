@@ -134,10 +134,9 @@ sshpass -p '<password>' ssh pi@pi.local "echo '<password>' | sudo -S systemctl r
 
 ```
 dtparam=spi=on
-dtoverlay=spi0-0cs
 ```
 
-The `spi0-0cs` overlay is **mandatory** on Pi Zero 2W + Bookworm. Without it, the SPI driver claims GPIO8 as chip-select, and the Inky library's gpiod requests fail with:
+`dtoverlay=spi0-0cs` is **not currently applied, and the frame works** (verified 2026-11-21): setup scripts deliberately remove it and the Inky patch below handles the CS pin. **If the display ever breaks** (silent no-update after an OS/Inky upgrade, or the GPIO8 error below), adding the overlay + reboot is one of the first things to try. Pi prototype only (ESP32 BLE frame has no config.txt). Without the patch AND without the overlay, the SPI driver claims GPIO8 as chip-select and the Inky library's gpiod requests fail with:
 ```
 Woah there, some pins we need are in use!
   ⚠️   Chip Select: (line 8, GPIO8) currently claimed by spi0 CS0
@@ -211,7 +210,7 @@ Handles both `inky_ac073tc1a.py` and `inky_e673.py` variants (including E673's `
 | Symptom | Cause | Fix |
 |---|---|---|
 | Display shows stale QR code, `show()` completes silently | Wrong driver (`inky_ac073tc1a` instead of `inky_e673`) | Use `inky.inky_e673.Inky` |
-| "Chip Select: GPIO8 currently claimed by spi0 CS0" | Missing `dtoverlay=spi0-0cs` in boot config | Add overlay, reboot |
+| "Chip Select: GPIO8 currently claimed by spi0 CS0" | Inky patch not applied (or, if patched, overlay missing) | Re-run `patch_inky.py`; else add `dtoverlay=spi0-0cs`, reboot |
 | `show()` fails with `FileNotFoundError: No such file or directory` | SPI not enabled | Add `dtparam=spi=on` to boot config |
 | GPIO event detection fails | `plink-buttons` service already claimed GPIO chip | Normal — webserver catches this and skips |
 | `ModuleNotFoundError: No module named 'inky'` (systemd) | `pip3 install` without `sudo` installs to `~/.local/` | Use `sudo pip3 install --break-system-packages` + add `Environment=PYTHONPATH=/home/pi/.local/lib/python3.13/site-packages` to systemd service |
