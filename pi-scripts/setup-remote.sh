@@ -187,6 +187,9 @@ _step_install_scripts() {
 step "Install helper scripts" _step_install_scripts
 
 _step_configure_services() {
+  # systemd needs the whole assignment quoted, with any inner double quote escaped
+  local DM="${DISPLAY_MODEL:-Inky Impression 7.3\"}"
+  local DM_ESC="${DM//\"/\\\"}"
   $SCP "$SCRIPT_DIR/dnsmasq.conf" "$PI:/tmp/dnsmasq.conf" && \
   $SCP "$SCRIPT_DIR/plink-buttons.service" "$PI:/tmp/plink-buttons.service" && \
   $SCP "$SCRIPT_DIR/plink-boot-check.service" "$PI:/tmp/plink-boot-check.service" && \
@@ -208,7 +211,7 @@ ExecStart=/usr/bin/python3 /home/pi/PiInk/src/webserver.py
 WorkingDirectory=/home/pi/PiInk/src
 User=pi
 Environment=PYTHONPATH=/home/pi/.local/lib/python3.13/site-packages
-Environment=DISPLAY_MODEL=${DISPLAY_MODEL:-Inky Impression 7.3\"}
+Environment=\"DISPLAY_MODEL=${DM_ESC}\"
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=5

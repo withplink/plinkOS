@@ -834,10 +834,10 @@ def api_wifi_connect():
                 )
         elif existing_profile:
             # Known network, no new password: reuse existing profile.
-            # toggle_hotspot.sh restores autoconnect on switch-back; ignore failure here
-            # (pi user lacks sudo to modify system NM profiles).
+            # Must use sudo: system NM profiles are root-owned, so a plain nmcli modify fails
+            # silently and a stale autoconnect=no would persist across reboots.
             subprocess.call(
-                ['nmcli', 'connection', 'modify', existing_profile, 'connection.autoconnect', 'yes'],
+                ['sudo', 'nmcli', 'connection', 'modify', existing_profile, 'connection.autoconnect', 'yes'],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
         else:
@@ -931,7 +931,8 @@ def api_hotspot_screen():
         import show_hotspot_screen as shs
         img = shs.draw_ap_screen(password) if mode == 'ap' else shs.draw_default_screen()
         threading.Thread(target=lambda: (
-            inky_display.set_image(img), inky_display.show()
+            inky_display.set_image(img), inky_display.show(),
+            _set_ap_screen_marker(mode == 'ap')
         ), daemon=True).start()
         return app.response_class(json.dumps({'ok': True}), mimetype='application/json')
     except Exception as e:
@@ -1104,6 +1105,39 @@ def saveSettings(orientationHorizontal,orientationVertical,adjustAR):
     with open(os.path.join(PATH,"config/settings.json"), "w") as f:
         json.dump(jsonStr, f)
 
+# Persistent marker (survives reboot, unlike /tmp): the e-ink currently shows the AP/QR screen.
+# E-ink keeps its last image through a power cycle, so if the frame later boots straight into
+# WiFi client mode, the stale AP screen stays up until something redraws. See _restore_display_after_ap.
+AP_SCREEN_MARKER = os.path.join(PATH, "config/ap_screen_shown")
+
+def _set_ap_screen_marker(shown):
+    try:
+        if shown:
+            open(AP_SCREEN_MARKER, "w").close()
+        elif os.path.exists(AP_SCREEN_MARKER):
+            os.remove(AP_SCREEN_MARKER)
+    except Exception as e:
+        print(f"ap screen marker error: {e}")
+
+def _restore_display_after_ap():
+    """On startup: if the last thing drawn was the AP screen and we're not in AP mode, redraw."""
+    if not os.path.exists(AP_SCREEN_MARKER) or os.path.exists('/tmp/plink_ap_mode'):
+        return
+    try:
+        q = load_queue()
+        if q["items"]:
+            print("[piink] stale AP screen on e-ink — restoring current queue item", flush=True)
+            _show_queue_item(q, q["current"])  # clears marker via updateEink
+        else:
+            print("[piink] stale AP screen on e-ink — drawing default screen", flush=True)
+            sys.path.insert(0, '/home/pi/PiInk/scripts')
+            import show_hotspot_screen as shs
+            inky_display.set_image(shs.draw_default_screen())
+            inky_display.show()
+            _set_ap_screen_marker(False)
+    except Exception as e:
+        print(f"restore after AP error: {e}", flush=True)
+
 def updateEink(filename, orientation, adjustAR, _manage_busy=True):
     try:
         with Image.open(os.path.join(PATH, "img/", filename)) as img:
@@ -1113,6 +1147,7 @@ def updateEink(filename, orientation, adjustAR, _manage_busy=True):
             if _manage_busy:
                 _set_rendering(True)
             inky_display.show()
+            _set_ap_screen_marker(False)
     finally:
         if _manage_busy:
             _set_rendering(False)
@@ -1310,5 +1345,9 @@ def _ensure_tailscale_serve():
 
 if __name__ == '__main__':
     app.secret_key = str(random.randint(100000,999999))
-    _ensure_tailscale_serve()
+    # Display doesn't need the HTTP server, so redraw first (tailscale serve below can take ~2 min).
+    threading.Thread(target=_restore_display_after_ap, daemon=True).start()
+    # Run in background: `tailscale ip`/`serve` can block for a long time at boot and must not
+    # delay the HTTP server (the app shows the frame as disconnected until port 80 answers).
+    threading.Thread(target=_ensure_tailscale_serve, daemon=True).start()
     app.run(host="0.0.0.0", port=80, threaded=True)

@@ -12,6 +12,22 @@ if [ -f "$FLAG" ]; then
     exit 0
 fi
 
+# Heal stale autoconnect=no. toggle_hotspot.sh disables autoconnect on the home profile when
+# entering AP mode and restores it from /tmp/plink_home_con on exit. /tmp is wiped on every boot,
+# so if the frame was power-cycled while in AP mode the restore note is lost and NetworkManager
+# would never rejoin the saved WiFi (boot -> no IP -> AP mode -> repeat). At this point (fresh boot,
+# AP flag absent) no profile should be disabled, so re-enable all saved client profiles.
+nmcli -t -f NAME,TYPE connection show \
+    | grep ':802-11-wireless$' \
+    | cut -d: -f1 \
+    | grep -v -e '^plink-rescue' -e '^plink-ap$' \
+    | while IFS= read -r CON; do
+        if [ "$(nmcli -g connection.autoconnect connection show "$CON" 2>/dev/null)" = "no" ]; then
+            echo "Re-enabling stale autoconnect on '$CON'."
+            nmcli connection modify "$CON" connection.autoconnect yes
+        fi
+    done
+
 # Any connection named plink-rescue* is excluded from profile count so setup screen still shows.
 # Check if any wifi profiles exist in NetworkManager (excluding rescue profile)
 WIFI_PROFILES=$(nmcli -t -f NAME,TYPE connection show \

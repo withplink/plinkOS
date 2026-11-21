@@ -98,6 +98,9 @@ step "Upload hotspot screen" \
 step "Upload hotspot toggle" \
   "$SCP pi-scripts/scripts/toggle_hotspot.sh '$HOST:/home/pi/PiInk/scripts/toggle_hotspot.sh'"
 
+step "Upload boot WiFi check" \
+  "$SCP pi-scripts/scripts/check_wifi_boot.sh '$HOST:/home/pi/PiInk/scripts/check_wifi_boot.sh' && $SSH 'chmod +x /home/pi/PiInk/scripts/check_wifi_boot.sh'"
+
 step "Upload resize script" \
   "$SCP pi-scripts/resize_images.py '$HOST:/home/pi/PiInk/scripts/resize_images.py'"
 
@@ -122,7 +125,10 @@ section "2/2" "Restarting frame"
 DISPLAY_MODEL="${DISPLAY_MODEL:-Inky Impression 7.3\"}"
 _step_display_model() {
   # Pipe printf output through SSH stdin into cat — sudo must not intercept stdin via echo|sudo -S
-  printf '[Service]\nEnvironment=DISPLAY_MODEL=%s\n' "$DISPLAY_MODEL" | \
+  # systemd needs the whole assignment quoted, with any inner double quote escaped
+  # (unquoted, `7.3"` is rejected: "Invalid syntax, ignoring").
+  local dm_esc="${DISPLAY_MODEL//\"/\\\"}"
+  printf '[Service]\nEnvironment="DISPLAY_MODEL=%s"\n' "$dm_esc" | \
     sshpass -p "$PI_PASS" ssh -T -q -o StrictHostKeyChecking=no -o LogLevel=ERROR "$PI_USER@$PI_HOST" \
       "sudo bash -c 'mkdir -p /etc/systemd/system/piink.service.d && cat > /etc/systemd/system/piink.service.d/display.conf && systemctl daemon-reload'"
 }

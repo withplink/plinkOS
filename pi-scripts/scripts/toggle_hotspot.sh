@@ -112,7 +112,13 @@ else
     # Save current home WiFi connection name so we can restore it later
     HOME_CON=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | grep ":wlan0$" | cut -d: -f1 | head -1)
     log "current home connection: '$HOME_CON'"
-    echo "$HOME_CON" > "$HOME_CON_FILE"
+    # Only record the note when there is a profile to restore (empty note is useless).
+    # Note lives in /tmp and is lost on reboot; check_wifi_boot.sh heals stale autoconnect=no at boot.
+    if [ -n "$HOME_CON" ]; then
+        echo "$HOME_CON" > "$HOME_CON_FILE"
+    else
+        rm -f "$HOME_CON_FILE"
+    fi
 
     # Disable autoconnect on home WiFi so NM doesn't kick hotspot off wlan0
     if [ -n "$HOME_CON" ]; then
